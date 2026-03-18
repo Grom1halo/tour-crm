@@ -17,12 +17,17 @@ const VouchersPage: React.FC = () => {
   const [isImportant, setIsImportant] = useState(false);
   const [tourDateFrom, setTourDateFrom] = useState('');
   const [tourDateTo, setTourDateTo] = useState('');
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 10;
 
   useEffect(() => {
     if (user?.role !== 'manager') {
       api.getManagers().then(res => setManagers(res.data)).catch(() => {});
     }
   }, [user]);
+
+  // Reset page when filters change
+  useEffect(() => { setPage(1); }, [search, paymentStatus, managerId, showDeleted, isImportant, tourDateFrom, tourDateTo]);
 
   useEffect(() => {
     loadVouchers();
@@ -137,7 +142,7 @@ const VouchersPage: React.FC = () => {
             <input type="date" value={tourDateTo} onChange={e => setTourDateTo(e.target.value)} className={inputCls + ' flex-1'} />
           </div>
           <div className="col-span-2 text-xs text-gray-400 flex items-center">
-            Найдено: {vouchers.length}
+            Найдено: {vouchers.length} | Страница {page} из {Math.max(1, Math.ceil(vouchers.length / PAGE_SIZE))}
           </div>
         </div>
       </div>
@@ -169,7 +174,7 @@ const VouchersPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {vouchers.map(v => (
+                {vouchers.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map(v => (
                   <tr
                     key={v.id}
                     className={[
@@ -214,6 +219,55 @@ const VouchersPage: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Pagination */}
+      {vouchers.length > PAGE_SIZE && (
+        <div className="flex items-center justify-between mt-4">
+          <p className="text-sm text-gray-500">
+            Показано {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, vouchers.length)} из {vouchers.length}
+          </p>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setPage(1)}
+              disabled={page === 1}
+              className="px-2 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+            >«</button>
+            <button
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+              disabled={page === 1}
+              className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+            >‹</button>
+            {Array.from({ length: Math.ceil(vouchers.length / PAGE_SIZE) }, (_, i) => i + 1)
+              .filter(n => n === 1 || n === Math.ceil(vouchers.length / PAGE_SIZE) || Math.abs(n - page) <= 2)
+              .reduce<(number | '...')[]>((acc, n, i, arr) => {
+                if (i > 0 && n - (arr[i - 1] as number) > 1) acc.push('...');
+                acc.push(n);
+                return acc;
+              }, [])
+              .map((n, i) =>
+                n === '...' ? (
+                  <span key={`e${i}`} className="px-2 py-1 text-sm text-gray-400">…</span>
+                ) : (
+                  <button
+                    key={n}
+                    onClick={() => setPage(n as number)}
+                    className={`px-3 py-1 text-sm border rounded ${page === n ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 hover:bg-gray-50'}`}
+                  >{n}</button>
+                )
+              )}
+            <button
+              onClick={() => setPage(p => Math.min(Math.ceil(vouchers.length / PAGE_SIZE), p + 1))}
+              disabled={page === Math.ceil(vouchers.length / PAGE_SIZE)}
+              className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+            >›</button>
+            <button
+              onClick={() => setPage(Math.ceil(vouchers.length / PAGE_SIZE))}
+              disabled={page === Math.ceil(vouchers.length / PAGE_SIZE)}
+              className="px-2 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+            >»</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

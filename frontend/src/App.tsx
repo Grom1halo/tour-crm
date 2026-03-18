@@ -8,6 +8,9 @@ import VoucherFormPage from './pages/VoucherFormPage';
 import VoucherDetailPage from './pages/VoucherDetailPage';
 import ClientsPage from './pages/ClientsPage';
 import ReportsPage from './pages/ReportsPage';
+import CompaniesPage from './pages/CompaniesPage';
+import ToursPage from './pages/ToursPage';
+import AgentsPage from './pages/AgentsPage';
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, loading } = useAuth();
@@ -28,6 +31,9 @@ function App() {
           <Route path="/vouchers/:id/edit" element={<ProtectedRoute><VoucherFormPage /></ProtectedRoute>} />
           <Route path="/clients" element={<ProtectedRoute><ClientsPage /></ProtectedRoute>} />
           <Route path="/reports" element={<ProtectedRoute><ReportsPage /></ProtectedRoute>} />
+          <Route path="/companies" element={<ProtectedRoute><CompaniesPage /></ProtectedRoute>} />
+          <Route path="/tours" element={<ProtectedRoute><ToursPage /></ProtectedRoute>} />
+          <Route path="/agents" element={<ProtectedRoute><AgentsPage /></ProtectedRoute>} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>
