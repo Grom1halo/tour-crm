@@ -6,6 +6,7 @@ import * as paymentController from '../controllers/paymentController';
 import * as referenceController from '../controllers/referenceController';
 import * as reportsController from '../controllers/reportsController';
 import * as usersController from '../controllers/usersController';
+import * as exportController from '../controllers/exportController';
 import { authenticate, authorize } from '../middleware/auth';
 
 const router = Router();
@@ -44,6 +45,7 @@ router.delete('/payments/:id', authenticate, authorize('manager', 'admin', 'acco
 router.get('/reports/totals', authenticate, reportsController.getReportTotals);
 router.get('/reports/summary', authenticate, reportsController.getSummaryReport);
 router.get('/reports/payments', authenticate, reportsController.getPaymentsReport);
+router.get('/reports/export/daily', authenticate, exportController.exportDailyAccounting);
 
 // ===== REFERENCE DATA =====
 router.get('/companies', authenticate, referenceController.getCompanies);

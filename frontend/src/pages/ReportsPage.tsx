@@ -22,6 +22,8 @@ const ReportsPage: React.FC = () => {
   const [rows, setRows] = useState<any[]>([]);
   const [payments, setPayments] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [exportDate, setExportDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     if (user?.role !== 'manager') {
@@ -57,6 +59,30 @@ const ReportsPage: React.FC = () => {
     }
   };
 
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const token = localStorage.getItem('token');
+      const params = new URLSearchParams({ date: exportDate });
+      if (managerId) params.append('managerId', managerId);
+      const res = await fetch(`/api/reports/export/daily?${params}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Export failed');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `accounting_${exportDate}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      alert('Ошибка экспорта');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const fmt = (v: any) => v ? `฿${Number(v).toLocaleString('ru', { minimumFractionDigits: 0 })}` : '฿0';
   const fmtNum = (v: any) => Number(v || 0).toLocaleString('ru');
 
@@ -64,7 +90,27 @@ const ReportsPage: React.FC = () => {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-gray-800 mb-4">Отчёты</h1>
+      <div className="flex justify-between items-center mb-4">
+        <h1 className="text-2xl font-bold text-gray-800">Отчёты</h1>
+
+        {/* Export block */}
+        <div className="flex items-center gap-2 bg-white rounded-lg shadow-sm px-4 py-2 border border-green-200">
+          <span className="text-sm text-gray-600 font-medium">Бухгалтерия за день:</span>
+          <input
+            type="date"
+            value={exportDate}
+            onChange={e => setExportDate(e.target.value)}
+            className="px-2 py-1 border border-gray-300 rounded text-sm outline-none focus:ring-2 focus:ring-green-500"
+          />
+          <button
+            onClick={handleExport}
+            disabled={exporting}
+            className="flex items-center gap-2 px-4 py-1.5 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 transition disabled:opacity-50"
+          >
+            {exporting ? 'Формируется...' : '⬇ Excel'}
+          </button>
+        </div>
+      </div>
 
       {/* Filters */}
       <div className="bg-white rounded-lg shadow-sm p-4 mb-4">
