@@ -35,6 +35,10 @@ logs/
 # Docker volumes
 postgres_data/
 
+# Claude settings (may contain local credentials)
+.claude/settings.local.json
+.claude/worktrees/
+
 # SQL dumps with client data
 voucher_dump.sql
 *_only.sql
