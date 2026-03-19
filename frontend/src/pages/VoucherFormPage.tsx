@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import * as api from '../api';
 
@@ -13,6 +13,9 @@ const VoucherFormPage: React.FC = () => {
   const [tours, setTours] = useState<any[]>([]);
   const [agents, setAgents] = useState<any[]>([]);
   const [loadingPrices, setLoadingPrices] = useState(false);
+
+  // Prevents company/price effects from overwriting data during initial edit load
+  const skipEffects = useRef(isEdit);
 
   const [formData, setFormData] = useState({
     tourType: 'group',
@@ -46,7 +49,11 @@ const VoucherFormPage: React.FC = () => {
 
   useEffect(() => {
     loadReferenceData();
-    if (isEdit) loadVoucher();
+    if (isEdit) {
+      loadVoucher().then(() => {
+        setTimeout(() => { skipEffects.current = false; }, 0);
+      });
+    }
   }, [id]);
 
   // When company changes — load tours for that company
@@ -54,8 +61,8 @@ const VoucherFormPage: React.FC = () => {
     if (formData.companyId) {
       api.getToursByCompany(Number(formData.companyId)).then(res => {
         setTours(res.data);
-        // If current tour not in new list — reset
-        if (!res.data.find((t: any) => String(t.id) === String(formData.tourId))) {
+        // Only reset tourId if user manually changed company (not initial edit load)
+        if (!skipEffects.current && !res.data.find((t: any) => String(t.id) === String(formData.tourId))) {
           setFormData(prev => ({ ...prev, tourId: '' }));
         }
       }).catch(() => {});
@@ -66,6 +73,7 @@ const VoucherFormPage: React.FC = () => {
 
   // Auto-fill prices when tour + company + date all selected
   useEffect(() => {
+    if (skipEffects.current) return; // skip during initial edit load
     const { tourId, companyId, tourDate } = formData;
     if (!tourId || !companyId || !tourDate) return;
 
@@ -144,8 +152,10 @@ const VoucherFormPage: React.FC = () => {
         isImportant: v.is_important || false,
         cancellationNotes: v.cancellation_notes || '',
       });
+      return true;
     } catch (error) {
       alert('Failed to load voucher');
+      return false;
     }
   };
 
