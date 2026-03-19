@@ -2,10 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import * as api from '../api';
 import { useAuth } from '../contexts/AuthContext';
+import { useLanguage } from '../i18n/LanguageContext';
 import { format } from 'date-fns';
 
 const VouchersPage: React.FC = () => {
   const { user } = useAuth();
+  const { t } = useLanguage();
   const [vouchers, setVouchers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [managers, setManagers] = useState<any[]>([]);
@@ -20,13 +22,30 @@ const VouchersPage: React.FC = () => {
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 10;
 
+  const [sortKey, setSortKey] = useState<'voucher_number'|'created_at'|'tour_date'|'client_name'|'company_name'|'total_sale'|'payment_status'>('tour_date');
+  const [sortDir, setSortDir] = useState<'asc'|'desc'>('desc');
+
+  const handleSort = (key: typeof sortKey) => {
+    if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortKey(key); setSortDir('asc'); }
+  };
+  const SortIcon = ({ k }: { k: typeof sortKey }) =>
+    <span className="ml-1 opacity-50">{sortKey === k ? (sortDir === 'asc' ? '▲' : '▼') : '⇅'}</span>;
+
+  const sorted = [...vouchers].sort((a, b) => {
+    const av = a[sortKey] ?? '', bv = b[sortKey] ?? '';
+    const cmp = (sortKey === 'total_sale')
+      ? Number(av) - Number(bv)
+      : String(av).localeCompare(String(bv));
+    return sortDir === 'asc' ? cmp : -cmp;
+  });
+
   useEffect(() => {
     if (user?.role !== 'manager') {
       api.getManagers().then(res => setManagers(res.data)).catch(() => {});
     }
   }, [user]);
 
-  // Reset page when filters change
   useEffect(() => { setPage(1); }, [search, paymentStatus, managerId, showDeleted, isImportant, tourDateFrom, tourDateTo]);
 
   useEffect(() => {
@@ -54,7 +73,7 @@ const VouchersPage: React.FC = () => {
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm('Удалить ваучер?')) return;
+    if (!confirm(t.vouchersDeleteConfirm)) return;
     try { await api.deleteVoucher(id); loadVouchers(); }
     catch { alert('Ошибка удаления'); }
   };
@@ -65,7 +84,7 @@ const VouchersPage: React.FC = () => {
   };
 
   const handleCopy = async (id: number) => {
-    try { await api.copyVoucher(id); loadVouchers(); alert('Ваучер скопирован!'); }
+    try { await api.copyVoucher(id); loadVouchers(); alert(t.voucherCopied); }
     catch { alert('Ошибка копирования'); }
   };
 
@@ -75,7 +94,11 @@ const VouchersPage: React.FC = () => {
       partial: 'bg-yellow-100 text-yellow-700',
       paid: 'bg-green-100 text-green-700',
     };
-    const labels: Record<string, string> = { unpaid: 'Не оплачен', partial: 'Частично', paid: 'Оплачен' };
+    const labels: Record<string, string> = {
+      unpaid: t.statusUnpaid,
+      partial: t.statusPartial,
+      paid: t.statusPaid,
+    };
     return (
       <span className={`px-2 py-1 rounded-full text-xs font-semibold ${styles[status] || ''}`}>
         {labels[status] || status}
@@ -88,9 +111,9 @@ const VouchersPage: React.FC = () => {
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
-        <h1 className="text-2xl font-bold text-gray-800">Ваучеры</h1>
+        <h1 className="text-2xl font-bold text-gray-800">{t.vouchersTitle}</h1>
         <Link to="/vouchers/new" className="px-5 py-2 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition text-sm">
-          + Новый ваучер
+          {t.vouchersNew}
         </Link>
       </div>
 
@@ -99,21 +122,21 @@ const VouchersPage: React.FC = () => {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
           <input
             type="text"
-            placeholder="Поиск: №, телефон, клиент..."
+            placeholder={t.vouchersSearchHolder}
             value={search}
             onChange={e => setSearch(e.target.value)}
             className={inputCls}
           />
           <select value={paymentStatus} onChange={e => setPaymentStatus(e.target.value)} className={inputCls}>
-            <option value="">Все статусы</option>
-            <option value="unpaid">Не оплачен</option>
-            <option value="partial">Частично</option>
-            <option value="paid">Оплачен</option>
+            <option value="">{t.vouchersAllStatuses}</option>
+            <option value="unpaid">{t.statusUnpaid}</option>
+            <option value="partial">{t.statusPartial}</option>
+            <option value="paid">{t.statusPaid}</option>
           </select>
 
           {user?.role !== 'manager' && (
             <select value={managerId} onChange={e => setManagerId(e.target.value)} className={inputCls}>
-              <option value="">Все менеджеры</option>
+              <option value="">{t.vouchersAllManagers}</option>
               {managers.map(m => (
                 <option key={m.id} value={m.id}>{m.full_name}</option>
               ))}
@@ -123,26 +146,26 @@ const VouchersPage: React.FC = () => {
           <div className="flex gap-4 items-center">
             <label className="flex items-center gap-1 text-sm cursor-pointer">
               <input type="checkbox" checked={showDeleted} onChange={e => setShowDeleted(e.target.checked)} className="w-4 h-4" />
-              Удалённые
+              {t.vouchersShowDeleted}
             </label>
             <label className="flex items-center gap-1 text-sm cursor-pointer text-red-600">
               <input type="checkbox" checked={isImportant} onChange={e => setIsImportant(e.target.checked)} className="w-4 h-4" />
-              Важные
+              {t.vouchersImportant}
             </label>
           </div>
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <div className="flex items-center gap-2">
-            <label className="text-xs text-gray-500 whitespace-nowrap">Тур с:</label>
+            <label className="text-xs text-gray-500 whitespace-nowrap">{t.vouchersTourFrom}</label>
             <input type="date" value={tourDateFrom} onChange={e => setTourDateFrom(e.target.value)} className={inputCls + ' flex-1'} />
           </div>
           <div className="flex items-center gap-2">
-            <label className="text-xs text-gray-500 whitespace-nowrap">по:</label>
+            <label className="text-xs text-gray-500 whitespace-nowrap">{t.vouchersTourTo}</label>
             <input type="date" value={tourDateTo} onChange={e => setTourDateTo(e.target.value)} className={inputCls + ' flex-1'} />
           </div>
           <div className="col-span-2 text-xs text-gray-400 flex items-center">
-            Найдено: {vouchers.length} | Страница {page} из {Math.max(1, Math.ceil(vouchers.length / PAGE_SIZE))}
+            {t.vouchersFound}: {vouchers.length} | {t.vouchersPage} {page} {t.vouchersOf} {Math.max(1, Math.ceil(vouchers.length / PAGE_SIZE))}
           </div>
         </div>
       </div>
@@ -150,31 +173,36 @@ const VouchersPage: React.FC = () => {
       {/* Table */}
       <div className="bg-white rounded-lg shadow-sm overflow-hidden">
         {loading ? (
-          <div className="p-8 text-center text-gray-400">Загрузка...</div>
+          <div className="p-8 text-center text-gray-400">{t.loading}</div>
         ) : vouchers.length === 0 ? (
-          <div className="p-8 text-center text-gray-400">Ваучеры не найдены</div>
+          <div className="p-8 text-center text-gray-400">{t.vouchersNotFound}</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
-                  <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Ваучер</th>
-                  <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Создан</th>
-                  <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Дата тура</th>
-                  <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Клиент</th>
-                  <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Телефон</th>
-                  {user?.role !== 'manager' && (
-                    <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Менеджер</th>
-                  )}
-                  <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Компания</th>
-                  <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Тур</th>
-                  <th className="px-3 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Сумма</th>
-                  <th className="px-3 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Статус</th>
-                  <th className="px-3 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Действия</th>
+                  {(() => {
+                    const th = (label: string, k?: typeof sortKey, align = 'text-left') => k
+                      ? <th key={k} onClick={() => handleSort(k)} className={`px-3 py-3 ${align} text-xs font-semibold text-gray-500 uppercase cursor-pointer hover:text-gray-700 select-none whitespace-nowrap`}>{label}<SortIcon k={k} /></th>
+                      : <th key={label} className={`px-3 py-3 ${align} text-xs font-semibold text-gray-500 uppercase whitespace-nowrap`}>{label}</th>;
+                    return [
+                      th(t.colVoucher,  'voucher_number'),
+                      th(t.colCreated,  'created_at'),
+                      th(t.colTourDate, 'tour_date'),
+                      th(t.colClient,   'client_name'),
+                      th(t.colPhone),
+                      user?.role !== 'manager' ? th(t.colManager) : null,
+                      th(t.colCompany,  'company_name'),
+                      th(t.colTour),
+                      th(t.colAmount,   'total_sale', 'text-right'),
+                      th(t.colStatus,   'payment_status', 'text-center'),
+                      th(t.actions,     undefined, 'text-right'),
+                    ];
+                  })()}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {vouchers.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map(v => (
+                {sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map(v => (
                   <tr
                     key={v.id}
                     className={[
@@ -203,12 +231,12 @@ const VouchersPage: React.FC = () => {
                     <td className="px-3 py-2 text-center">{getStatusBadge(v.payment_status)}</td>
                     <td className="px-3 py-2 text-right whitespace-nowrap">
                       {v.is_deleted ? (
-                        <button onClick={() => handleRestore(v.id)} className="text-green-600 hover:text-green-800 text-xs font-medium">Восстановить</button>
+                        <button onClick={() => handleRestore(v.id)} className="text-green-600 hover:text-green-800 text-xs font-medium">{t.restoreBtn}</button>
                       ) : (
                         <div className="flex justify-end gap-3">
-                          <button onClick={() => handleCopy(v.id)} className="text-blue-500 hover:text-blue-700 text-xs">Копия</button>
-                          <Link to={`/vouchers/${v.id}/edit`} className="text-blue-600 hover:text-blue-800 text-xs">Ред.</Link>
-                          <button onClick={() => handleDelete(v.id)} className="text-red-500 hover:text-red-700 text-xs">Удалить</button>
+                          <button onClick={() => handleCopy(v.id)} className="text-blue-500 hover:text-blue-700 text-xs">{t.copyBtn}</button>
+                          <Link to={`/vouchers/${v.id}/edit`} className="text-blue-600 hover:text-blue-800 text-xs">{t.editBtn}</Link>
+                          <button onClick={() => handleDelete(v.id)} className="text-red-500 hover:text-red-700 text-xs">{t.deleteBtn}</button>
                         </div>
                       )}
                     </td>
@@ -224,19 +252,11 @@ const VouchersPage: React.FC = () => {
       {vouchers.length > PAGE_SIZE && (
         <div className="flex items-center justify-between mt-4">
           <p className="text-sm text-gray-500">
-            Показано {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, vouchers.length)} из {vouchers.length}
+            {t.vouchersShowing} {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, vouchers.length)} {t.vouchersOf} {vouchers.length}
           </p>
           <div className="flex items-center gap-1">
-            <button
-              onClick={() => setPage(1)}
-              disabled={page === 1}
-              className="px-2 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
-            >«</button>
-            <button
-              onClick={() => setPage(p => Math.max(1, p - 1))}
-              disabled={page === 1}
-              className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
-            >‹</button>
+            <button onClick={() => setPage(1)} disabled={page === 1} className="px-2 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed">«</button>
+            <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed">‹</button>
             {Array.from({ length: Math.ceil(vouchers.length / PAGE_SIZE) }, (_, i) => i + 1)
               .filter(n => n === 1 || n === Math.ceil(vouchers.length / PAGE_SIZE) || Math.abs(n - page) <= 2)
               .reduce<(number | '...')[]>((acc, n, i, arr) => {
@@ -255,16 +275,8 @@ const VouchersPage: React.FC = () => {
                   >{n}</button>
                 )
               )}
-            <button
-              onClick={() => setPage(p => Math.min(Math.ceil(vouchers.length / PAGE_SIZE), p + 1))}
-              disabled={page === Math.ceil(vouchers.length / PAGE_SIZE)}
-              className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
-            >›</button>
-            <button
-              onClick={() => setPage(Math.ceil(vouchers.length / PAGE_SIZE))}
-              disabled={page === Math.ceil(vouchers.length / PAGE_SIZE)}
-              className="px-2 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
-            >»</button>
+            <button onClick={() => setPage(p => Math.min(Math.ceil(vouchers.length / PAGE_SIZE), p + 1))} disabled={page === Math.ceil(vouchers.length / PAGE_SIZE)} className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed">›</button>
+            <button onClick={() => setPage(Math.ceil(vouchers.length / PAGE_SIZE))} disabled={page === Math.ceil(vouchers.length / PAGE_SIZE)} className="px-2 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed">»</button>
           </div>
         </div>
       )}

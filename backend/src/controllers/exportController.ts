@@ -59,24 +59,27 @@ function fmt(d: any): string {
 
 export const exportDailyAccounting = async (req: AuthRequest, res: Response) => {
   try {
-    const { date, managerId } = req.query;
+    const { date, dateFrom: dfParam, dateTo: dtParam, managerId } = req.query;
     const user = req.user!;
 
-    if (!date) return res.status(400).json({ error: 'date required' });
+    // Support both single date (legacy) and dateFrom/dateTo range
+    const dateFrom = dfParam ? String(dfParam) : (date ? String(date) : null);
+    const dateTo   = dtParam ? String(dtParam) : (date ? String(date) : null);
 
-    const dateStr = String(date);
-    const params: any[] = [dateStr];
+    if (!dateFrom) return res.status(400).json({ error: 'dateFrom required' });
+
+    const params: any[] = [dateFrom, dateTo || dateFrom];
     let managerFilter = '';
 
     if (user.role === 'manager') {
-      managerFilter = ` AND v.manager_id = $2`;
+      managerFilter = ` AND v.manager_id = $3`;
       params.push(user.id);
     } else if (managerId) {
-      managerFilter = ` AND v.manager_id = $2`;
+      managerFilter = ` AND v.manager_id = $3`;
       params.push(managerId);
     }
 
-    // Vouchers for the day (tour_date)
+    // Vouchers sold in the period (by created_at = sale date)
     const vouchersRes = await pool.query(
       `SELECT
         v.voucher_number, v.tour_type, v.tour_date, v.tour_date_end, v.tour_time,
@@ -86,7 +89,7 @@ export const exportDailyAccounting = async (req: AuthRequest, res: Response) => 
         v.total_sale, v.total_net, v.paid_to_agency, v.cash_on_tour,
         v.payment_status, v.hotel_name, v.room_number,
         v.remarks, v.is_important, v.cancellation_notes,
-        v.agent_commission_percentage,
+        v.agent_commission_percentage, v.created_at as sale_date,
         c.name as client_name, c.phone as client_phone,
         co.name as company_name, t.name as tour_name,
         u.full_name as manager_name, u.manager_phone,
@@ -97,12 +100,13 @@ export const exportDailyAccounting = async (req: AuthRequest, res: Response) => 
       LEFT JOIN tours t ON v.tour_id = t.id
       LEFT JOIN users u ON v.manager_id = u.id
       LEFT JOIN agents a ON v.agent_id = a.id
-      WHERE v.tour_date::date = $1::date AND v.is_deleted = false ${managerFilter}
-      ORDER BY v.is_important DESC, co.name, v.tour_time`,
+      WHERE v.created_at::date >= $1::date AND v.created_at::date <= $2::date
+        AND v.is_deleted = false ${managerFilter}
+      ORDER BY v.is_important DESC, co.name, v.created_at`,
       params
     );
 
-    // Payments received on the day
+    // Payments received in the period
     const paymentsRes = await pool.query(
       `SELECT
         p.payment_date, p.amount, p.currency, p.payment_method, p.notes,
@@ -116,7 +120,8 @@ export const exportDailyAccounting = async (req: AuthRequest, res: Response) => 
       LEFT JOIN companies co ON v.company_id = co.id
       LEFT JOIN tours t ON v.tour_id = t.id
       LEFT JOIN users u ON v.manager_id = u.id
-      WHERE p.payment_date::date = $1::date AND v.is_deleted = false ${managerFilter}
+      WHERE p.payment_date::date >= $1::date AND p.payment_date::date <= $2::date
+        AND v.is_deleted = false ${managerFilter}
       ORDER BY p.payment_date`,
       params
     );
@@ -129,7 +134,9 @@ export const exportDailyAccounting = async (req: AuthRequest, res: Response) => 
     wb.creator = 'Tour Tour Phuket CRM';
     wb.created = new Date();
 
-    const dateFormatted = new Date(dateStr).toLocaleDateString('ru-RU');
+    const dateFormatted = dateFrom === dateTo
+      ? new Date(dateFrom).toLocaleDateString('ru-RU')
+      : `${new Date(dateFrom).toLocaleDateString('ru-RU')} – ${new Date(dateTo!).toLocaleDateString('ru-RU')}`;
 
     // ═══════════════════════════════════════════════
     // SHEET 1: VOUCHERS
@@ -376,7 +383,9 @@ export const exportDailyAccounting = async (req: AuthRequest, res: Response) => 
     ws3.getColumn(2).width = 20;
 
     // ── STREAM RESPONSE ──
-    const filename = `accounting_${dateStr}.xlsx`;
+    const filename = dateFrom === dateTo
+      ? `accounting_${dateFrom}.xlsx`
+      : `accounting_${dateFrom}_${dateTo}.xlsx`;
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
 

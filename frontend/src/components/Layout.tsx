@@ -1,20 +1,23 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { useLanguage } from '../i18n/LanguageContext';
 
 const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, logout } = useAuth();
   const location = useLocation();
+  const { t, lang, setLang } = useLanguage();
 
   const isActive = (path: string) => location.pathname === path;
 
   const navItems = [
-    { path: '/',         label: 'Ваучеры',   roles: ['manager', 'admin', 'hotline', 'accountant'] },
-    { path: '/clients',  label: 'Клиенты',   roles: ['manager', 'admin'] },
-    { path: '/reports',  label: 'Отчёты',    roles: ['manager', 'admin', 'accountant'] },
-    { path: '/companies',label: 'Компании',  roles: ['admin'] },
-    { path: '/tours',    label: 'Туры',      roles: ['admin'] },
-    { path: '/agents',   label: 'Агенты',    roles: ['admin'] },
+    { path: '/',          label: t.navVouchers,  roles: ['manager', 'admin', 'hotline', 'accountant'] },
+    { path: '/clients',   label: t.navClients,   roles: ['manager', 'admin'] },
+    { path: '/reports',   label: t.navReports,   roles: ['manager', 'admin', 'accountant'] },
+    { path: '/companies', label: t.navCompanies, roles: ['admin'] },
+    { path: '/tours',     label: t.navTours,     roles: ['admin'] },
+    { path: '/agents',    label: t.navAgents,    roles: ['admin', 'manager'] },
+    { path: '/managers',  label: t.navManagers,  roles: ['admin'] },
   ];
 
   return (
@@ -45,6 +48,21 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
               </nav>
             </div>
             <div className="flex items-center space-x-3">
+              {/* Language switcher */}
+              <div className="flex items-center border border-gray-200 rounded-lg overflow-hidden text-xs font-semibold">
+                <button
+                  onClick={() => setLang('ru')}
+                  className={`px-2.5 py-1.5 transition ${lang === 'ru' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-50'}`}
+                >
+                  RU
+                </button>
+                <button
+                  onClick={() => setLang('en')}
+                  className={`px-2.5 py-1.5 transition ${lang === 'en' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-50'}`}
+                >
+                  EN
+                </button>
+              </div>
               <div className="text-right">
                 <p className="text-sm font-medium text-gray-700">{user?.fullName}</p>
                 <p className="text-xs text-gray-500 capitalize">{user?.role}</p>
@@ -53,7 +71,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
                 onClick={logout}
                 className="px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 rounded-lg transition"
               >
-                Выход
+                {t.logout}
               </button>
             </div>
           </div>

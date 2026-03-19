@@ -23,15 +23,15 @@ export const getCompanies = async (req: AuthRequest, res: Response) => {
 
 export const createCompany = async (req: AuthRequest, res: Response) => {
   try {
-    const { name } = req.body;
+    const { name, article } = req.body;
 
     if (!name) {
       return res.status(400).json({ error: 'Name required' });
     }
 
     const result = await pool.query(
-      'INSERT INTO companies (name) VALUES ($1) RETURNING *',
-      [name]
+      'INSERT INTO companies (name, article) VALUES ($1, $2) RETURNING *',
+      [name, article || '']
     );
 
     res.status(201).json(result.rows[0]);
@@ -49,12 +49,13 @@ export const updateCompany = async (req: AuthRequest, res: Response) => {
     const { id } = req.params;
     const { name, isActive } = req.body;
 
+    const { article } = req.body;
     const result = await pool.query(
-      `UPDATE companies 
-       SET name = $1, is_active = $2, updated_at = CURRENT_TIMESTAMP
-       WHERE id = $3
+      `UPDATE companies
+       SET name = $1, is_active = $2, article = $3, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $4
        RETURNING *`,
-      [name, isActive, id]
+      [name, isActive, article || '', id]
     );
 
     if (result.rows.length === 0) {
@@ -97,15 +98,15 @@ export const getTours = async (req: AuthRequest, res: Response) => {
 
 export const createTour = async (req: AuthRequest, res: Response) => {
   try {
-    const { name, tourType } = req.body;
+    const { name, tourType, cancellationTerms, article } = req.body;
 
     if (!name || !tourType) {
       return res.status(400).json({ error: 'Name and tourType required' });
     }
 
     const result = await pool.query(
-      'INSERT INTO tours (name, tour_type) VALUES ($1, $2) RETURNING *',
-      [name, tourType]
+      'INSERT INTO tours (name, tour_type, cancellation_terms, article) VALUES ($1, $2, $3, $4) RETURNING *',
+      [name, tourType, cancellationTerms || [], article || '']
     );
 
     res.status(201).json(result.rows[0]);
@@ -118,14 +119,19 @@ export const createTour = async (req: AuthRequest, res: Response) => {
 export const updateTour = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
-    const { name, tourType, isActive } = req.body;
+    const { name, tourType, isActive, cancellationTerms, article } = req.body;
+
+    const terms = cancellationTerms || [];
+    // Auto-clear needs_attention if cancellation terms are set
+    const hasTerms = terms.length > 0;
 
     const result = await pool.query(
-      `UPDATE tours 
-       SET name = $1, tour_type = $2, is_active = $3, updated_at = CURRENT_TIMESTAMP
-       WHERE id = $4
+      `UPDATE tours
+       SET name = $1, tour_type = $2, is_active = $3, cancellation_terms = $4, article = $5, updated_at = CURRENT_TIMESTAMP,
+           needs_attention = CASE WHEN $6 THEN false ELSE needs_attention END
+       WHERE id = $7
        RETURNING *`,
-      [name, tourType, isActive, id]
+      [name, tourType, isActive, terms, article || '', hasTerms, id]
     );
 
     if (result.rows.length === 0) {
@@ -189,24 +195,49 @@ export const createTourPrice = async (req: AuthRequest, res: Response) => {
       tourId, companyId, validFrom, validTo,
       adultNet, childNet, infantNet, transferNet, otherNet,
       adultSale, childSale, infantSale, transferSale, otherSale,
+      article,
     } = req.body;
 
     if (!tourId || !companyId || !validFrom || !validTo) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
+    if (new Date(validFrom) > new Date(validTo)) {
+      return res.status(400).json({ error: 'Start date must be before end date' });
+    }
+
+    // Check for overlapping periods
+    const overlap = await pool.query(
+      `SELECT id, valid_from, valid_to FROM tour_prices
+       WHERE tour_id=$1 AND company_id=$2 AND is_active=true
+         AND valid_from <= $3 AND valid_to >= $4`,
+      [tourId, companyId, validTo, validFrom]
+    );
+    if (overlap.rows.length > 0) {
+      const ex = overlap.rows[0];
+      return res.status(400).json({
+        error: `Period overlaps with existing: ${ex.valid_from?.split('T')[0]} — ${ex.valid_to?.split('T')[0]}`,
+      });
+    }
+
     const result = await pool.query(
       `INSERT INTO tour_prices (
-        tour_id, company_id, valid_from, valid_to,
+        tour_id, company_id, valid_from, valid_to, article,
         adult_net, child_net, infant_net, transfer_net, other_net,
         adult_sale, child_sale, infant_sale, transfer_sale, other_sale
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
       RETURNING *`,
       [
-        tourId, companyId, validFrom, validTo,
+        tourId, companyId, validFrom, validTo, article || '',
         adultNet || 0, childNet || 0, infantNet || 0, transferNet || 0, otherNet || 0,
         adultSale || 0, childSale || 0, infantSale || 0, transferSale || 0, otherSale || 0,
       ]
+    );
+
+    // Auto-clear needs_attention when a price is added
+    await pool.query(
+      'UPDATE tours SET needs_attention = false WHERE id = $1',
+      [tourId]
     );
 
     res.status(201).json(result.rows[0]);
@@ -226,22 +257,46 @@ export const updateTourPrice = async (req: AuthRequest, res: Response) => {
       validFrom, validTo,
       adultNet, childNet, infantNet, transferNet, otherNet,
       adultSale, childSale, infantSale, transferSale, otherSale,
-      isActive,
+      isActive, article,
     } = req.body;
+
+    if (new Date(validFrom) > new Date(validTo)) {
+      return res.status(400).json({ error: 'Start date must be before end date' });
+    }
+
+    // Look up tour_id and company_id of the record being edited
+    const current = await pool.query('SELECT tour_id, company_id FROM tour_prices WHERE id=$1', [id]);
+    if (current.rows.length === 0) return res.status(404).json({ error: 'Tour price not found' });
+    const { tour_id: tourId, company_id: companyId } = current.rows[0];
+
+    // Check for overlapping periods (excluding self)
+    const overlap = await pool.query(
+      `SELECT id, valid_from, valid_to FROM tour_prices
+       WHERE tour_id=$1 AND company_id=$2 AND is_active=true
+         AND valid_from <= $3 AND valid_to >= $4
+         AND id != $5`,
+      [tourId, companyId, validTo, validFrom, id]
+    );
+    if (overlap.rows.length > 0) {
+      const ex = overlap.rows[0];
+      return res.status(400).json({
+        error: `Period overlaps with existing: ${ex.valid_from?.split('T')[0]} — ${ex.valid_to?.split('T')[0]}`,
+      });
+    }
 
     const result = await pool.query(
       `UPDATE tour_prices SET
-        valid_from = $1, valid_to = $2,
-        adult_net = $3, child_net = $4, infant_net = $5, transfer_net = $6, other_net = $7,
-        adult_sale = $8, child_sale = $9, infant_sale = $10, transfer_sale = $11, other_sale = $12,
-        is_active = $13, updated_at = CURRENT_TIMESTAMP
-      WHERE id = $14
+        valid_from = $1, valid_to = $2, article = $3,
+        adult_net = $4, child_net = $5, infant_net = $6, transfer_net = $7, other_net = $8,
+        adult_sale = $9, child_sale = $10, infant_sale = $11, transfer_sale = $12, other_sale = $13,
+        is_active = $14, updated_at = CURRENT_TIMESTAMP
+      WHERE id = $15
       RETURNING *`,
       [
-        validFrom, validTo,
+        validFrom, validTo, article || '',
         adultNet, childNet, infantNet, transferNet, otherNet,
         adultSale, childSale, infantSale, transferSale, otherSale,
-        isActive, id,
+        isActive ?? true, id,
       ]
     );
 
@@ -252,6 +307,18 @@ export const updateTourPrice = async (req: AuthRequest, res: Response) => {
     res.json(result.rows[0]);
   } catch (error) {
     console.error('Update tour price error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+export const deleteTourPrice = async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query('DELETE FROM tour_prices WHERE id=$1 RETURNING id', [id]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Tour price not found' });
+    res.json({ message: 'Tour price deleted' });
+  } catch (error) {
+    console.error('Delete tour price error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 };
@@ -295,13 +362,31 @@ export const createAgent = async (req: AuthRequest, res: Response) => {
   }
 };
 
+export const deleteAgent = async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    // Check if agent is used in any vouchers
+    const check = await pool.query('SELECT COUNT(*) FROM vouchers WHERE agent_id=$1 AND is_deleted=false', [id]);
+    if (parseInt(check.rows[0].count) > 0) {
+      // Has active vouchers — soft delete only
+      await pool.query('UPDATE agents SET is_active=false, updated_at=CURRENT_TIMESTAMP WHERE id=$1', [id]);
+      return res.json({ message: 'Agent deactivated (has linked vouchers)' });
+    }
+    await pool.query('DELETE FROM agents WHERE id=$1', [id]);
+    res.json({ message: 'Agent deleted' });
+  } catch (error) {
+    console.error('Delete agent error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
 export const updateAgent = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
     const { name, commissionPercentage, isActive } = req.body;
 
     const result = await pool.query(
-      `UPDATE agents 
+      `UPDATE agents
        SET name = $1, commission_percentage = $2, is_active = $3, updated_at = CURRENT_TIMESTAMP
        WHERE id = $4
        RETURNING *`,
@@ -315,6 +400,62 @@ export const updateAgent = async (req: AuthRequest, res: Response) => {
     res.json(result.rows[0]);
   } catch (error) {
     console.error('Update agent error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+// ===== SEASONS =====
+export const getSeasons = async (req: AuthRequest, res: Response) => {
+  try {
+    const result = await pool.query('SELECT * FROM seasons ORDER BY sort_order, valid_from');
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Get seasons error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+export const createSeason = async (req: AuthRequest, res: Response) => {
+  try {
+    const { label, validFrom, validTo, sortOrder } = req.body;
+    if (!label || !validFrom || !validTo) {
+      return res.status(400).json({ error: 'label, validFrom, validTo required' });
+    }
+    const result = await pool.query(
+      'INSERT INTO seasons (label, valid_from, valid_to, sort_order) VALUES ($1, $2, $3, $4) RETURNING *',
+      [label, validFrom, validTo, sortOrder ?? 0]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Create season error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+export const updateSeason = async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { label, validFrom, validTo, sortOrder } = req.body;
+    const result = await pool.query(
+      `UPDATE seasons SET label=$1, valid_from=$2, valid_to=$3, sort_order=$4, updated_at=CURRENT_TIMESTAMP WHERE id=$5 RETURNING *`,
+      [label, validFrom, validTo, sortOrder ?? 0, id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Season not found' });
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Update season error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+export const deleteSeason = async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query('DELETE FROM seasons WHERE id=$1 RETURNING id', [id]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Season not found' });
+    res.json({ message: 'Season deleted' });
+  } catch (error) {
+    console.error('Delete season error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 };

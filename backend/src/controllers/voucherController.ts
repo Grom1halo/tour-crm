@@ -2,17 +2,20 @@ import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import pool from '../config/database';
 
-const generateVoucherNumber = async (): Promise<string> => {
-  const date = new Date();
-  const year = date.getFullYear().toString().slice(-2);
-  const month = (date.getMonth() + 1).toString().padStart(2, '0');
+const generateVoucherNumber = async (managerId: number): Promise<string> => {
+  // Atomically increment voucher_counter (starts at 499 so first use → 500)
+  // Uses manager_number as the 2-digit prefix, same as old system's str_pad($user_id, 2, 0)
   const result = await pool.query(
-    `SELECT voucher_number FROM vouchers WHERE voucher_number LIKE $1 ORDER BY voucher_number DESC LIMIT 1`,
-    [`V${year}${month}%`]
+    `UPDATE users
+     SET voucher_counter = COALESCE(voucher_counter, 499) + 1
+     WHERE id = $1
+     RETURNING manager_number, voucher_counter`,
+    [managerId]
   );
-  let sequence = 1;
-  if (result.rows.length > 0) sequence = parseInt(result.rows[0].voucher_number.slice(-4)) + 1;
-  return `V${year}${month}${sequence.toString().padStart(4, '0')}`;
+  const row = result.rows[0];
+  const managerNum = (row?.manager_number || '00').toString().padStart(2, '0');
+  const counter = row?.voucher_counter ?? 500;
+  return `${managerNum}${counter}`;
 };
 
 export const getVouchers = async (req: AuthRequest, res: Response) => {
@@ -118,8 +121,8 @@ export const createVoucher = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    const voucherNumber = await generateVoucherNumber();
     const managerId = user.role === 'manager' ? user.id : (req.body.managerId || user.id);
+    const voucherNumber = await generateVoucherNumber(managerId);
 
     const result = await client.query(
       `INSERT INTO vouchers (
@@ -247,7 +250,7 @@ export const copyVoucher = async (req: AuthRequest, res: Response) => {
     if (original.rows.length === 0) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Voucher not found' }); }
     const v = original.rows[0];
     if (user.role === 'manager' && v.manager_id !== user.id) { await client.query('ROLLBACK'); return res.status(403).json({ error: 'Access denied' }); }
-    const voucherNumber = await generateVoucherNumber();
+    const voucherNumber = await generateVoucherNumber(v.manager_id || user.id);
     const result = await client.query(
       `INSERT INTO vouchers (
         voucher_number, tour_type, client_id, manager_id, company_id, tour_id,
@@ -292,13 +295,32 @@ export const getTourPrices = async (req: AuthRequest, res: Response) => {
   }
 };
 
+export const getCompaniesByTour = async (req: AuthRequest, res: Response) => {
+  try {
+    const { tourId } = req.params;
+    const result = await pool.query(
+      `SELECT c.id, c.name, c.article, tp.article as price_article
+       FROM companies c
+       JOIN tour_prices tp ON tp.company_id = c.id
+       WHERE tp.tour_id = $1 AND c.is_active = true AND tp.is_active = true
+       ORDER BY c.name`,
+      [tourId]
+    );
+    res.json(result.rows);
+  } catch (error) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
 export const getToursByCompany = async (req: AuthRequest, res: Response) => {
   try {
     const { companyId } = req.params;
+    // Return article per tour+company (take max so DISTINCT works; article should be same across periods)
     const result = await pool.query(
-      `SELECT DISTINCT t.id, t.name, t.tour_type
+      `SELECT t.id, t.name, t.tour_type, t.article as tour_article, MAX(tp.article) as price_article
        FROM tours t JOIN tour_prices tp ON tp.tour_id = t.id
        WHERE tp.company_id=$1 AND t.is_active=true AND tp.is_active=true
+       GROUP BY t.id, t.name, t.tour_type, t.article
        ORDER BY t.name`,
       [companyId]
     );

@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import * as api from '../api';
 import { useAuth } from '../contexts/AuthContext';
+import { useLanguage } from '../i18n/LanguageContext';
 
 type GroupBy = 'manager' | 'company' | 'tour' | 'day';
 type ReportTab = 'summary' | 'payments';
 
 const ReportsPage: React.FC = () => {
   const { user } = useAuth();
+  const { t } = useLanguage();
   const [tab, setTab] = useState<ReportTab>('summary');
   const [groupBy, setGroupBy] = useState<GroupBy>('manager');
   const [managers, setManagers] = useState<any[]>([]);
@@ -22,12 +24,18 @@ const ReportsPage: React.FC = () => {
   const [rows, setRows] = useState<any[]>([]);
   const [payments, setPayments] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
-  const [exportDate, setExportDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [exportDateFrom, setExportDateFrom] = useState(() => {
+    const d = new Date(); d.setDate(1); return d.toISOString().split('T')[0];
+  });
+  const [exportDateTo, setExportDateTo] = useState(() => new Date().toISOString().split('T')[0]);
   const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     if (user?.role !== 'manager') {
-      api.getManagers().then(r => setManagers(r.data)).catch(() => {});
+      api.getManagers().then(r => {
+        // Only show active managers
+        setManagers((r.data as any[]).filter((m: any) => m.is_active !== false));
+      }).catch(() => {});
     }
   }, [user]);
 
@@ -39,10 +47,7 @@ const ReportsPage: React.FC = () => {
     setLoading(true);
     try {
       const params = { dateFrom, dateTo, managerId: managerId || undefined };
-
-      const [totalsRes] = await Promise.all([
-        api.getReportTotals(params),
-      ]);
+      const [totalsRes] = await Promise.all([api.getReportTotals(params)]);
       setTotals(totalsRes.data);
 
       if (tab === 'summary') {
@@ -63,7 +68,7 @@ const ReportsPage: React.FC = () => {
     setExporting(true);
     try {
       const token = localStorage.getItem('token');
-      const params = new URLSearchParams({ date: exportDate });
+      const params = new URLSearchParams({ dateFrom: exportDateFrom, dateTo: exportDateTo });
       if (managerId) params.append('managerId', managerId);
       const res = await fetch(`/api/reports/export/daily?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -73,7 +78,7 @@ const ReportsPage: React.FC = () => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `accounting_${exportDate}.xlsx`;
+      a.download = `accounting_${exportDateFrom}_${exportDateTo}.xlsx`;
       a.click();
       URL.revokeObjectURL(url);
     } catch {
@@ -88,18 +93,37 @@ const ReportsPage: React.FC = () => {
 
   const inputCls = 'px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500';
 
+  const groupLabels: Record<GroupBy, string> = {
+    manager: t.reportsGroupManager,
+    company: t.reportsGroupCompany,
+    tour: t.reportsGroupTour,
+    day: t.reportsGroupDay,
+  };
+
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
-        <h1 className="text-2xl font-bold text-gray-800">Отчёты</h1>
+        <h1 className="text-2xl font-bold text-gray-800">{t.reportsTitle}</h1>
 
         {/* Export block */}
         <div className="flex items-center gap-2 bg-white rounded-lg shadow-sm px-4 py-2 border border-green-200">
-          <span className="text-sm text-gray-600 font-medium">Бухгалтерия за день:</span>
+          <span className="text-sm text-gray-600 font-medium">{t.reportsDailyAccounting}</span>
+          <button
+            onClick={() => { const d = new Date().toISOString().split('T')[0]; setExportDateFrom(d); setExportDateTo(d); }}
+            className="px-2 py-1 bg-gray-100 text-gray-600 rounded text-xs hover:bg-gray-200 whitespace-nowrap"
+            title="Сегодня"
+          >Сегодня</button>
           <input
             type="date"
-            value={exportDate}
-            onChange={e => setExportDate(e.target.value)}
+            value={exportDateFrom}
+            onChange={e => setExportDateFrom(e.target.value)}
+            className="px-2 py-1 border border-gray-300 rounded text-sm outline-none focus:ring-2 focus:ring-green-500"
+          />
+          <span className="text-gray-400 text-sm">—</span>
+          <input
+            type="date"
+            value={exportDateTo}
+            onChange={e => setExportDateTo(e.target.value)}
             className="px-2 py-1 border border-gray-300 rounded text-sm outline-none focus:ring-2 focus:ring-green-500"
           />
           <button
@@ -107,7 +131,7 @@ const ReportsPage: React.FC = () => {
             disabled={exporting}
             className="flex items-center gap-2 px-4 py-1.5 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 transition disabled:opacity-50"
           >
-            {exporting ? 'Формируется...' : '⬇ Excel'}
+            {exporting ? t.reportsExporting : t.reportsExportBtn}
           </button>
         </div>
       </div>
@@ -116,24 +140,24 @@ const ReportsPage: React.FC = () => {
       <div className="bg-white rounded-lg shadow-sm p-4 mb-4">
         <div className="flex flex-wrap gap-3 items-end">
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Дата (тур) с</label>
+            <label className="block text-xs text-gray-500 mb-1">{t.reportsDateFrom}</label>
             <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className={inputCls} />
           </div>
           <div>
-            <label className="block text-xs text-gray-500 mb-1">по</label>
+            <label className="block text-xs text-gray-500 mb-1">{t.reportsDateTo}</label>
             <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className={inputCls} />
           </div>
           {user?.role !== 'manager' && (
             <div>
-              <label className="block text-xs text-gray-500 mb-1">Менеджер</label>
+              <label className="block text-xs text-gray-500 mb-1">{t.reportsManager}</label>
               <select value={managerId} onChange={e => setManagerId(e.target.value)} className={inputCls}>
-                <option value="">Все менеджеры</option>
+                <option value="">{t.reportsAllManagers}</option>
                 {managers.map(m => <option key={m.id} value={m.id}>{m.full_name}</option>)}
               </select>
             </div>
           )}
           <button onClick={loadReport} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">
-            Обновить
+            {t.reportsRefresh}
           </button>
         </div>
       </div>
@@ -142,14 +166,14 @@ const ReportsPage: React.FC = () => {
       {totals && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
           {[
-            { label: 'Ваучеров', value: fmtNum(totals.voucher_count), color: 'blue' },
-            { label: 'Продаж (Sale)', value: fmt(totals.total_sale), color: 'green' },
-            { label: 'Нетто', value: fmt(totals.total_net), color: 'gray' },
-            { label: 'Прибыль', value: fmt(totals.profit), color: Number(totals.profit) >= 0 ? 'green' : 'red' },
-            { label: 'Получено (Paid)', value: fmt(totals.total_paid), color: 'blue' },
-            { label: 'Наличные в туре', value: fmt(totals.total_cash_on_tour), color: 'yellow' },
-            { label: 'Пассажиров', value: fmtNum(totals.total_pax), color: 'purple' },
-            { label: 'Оплачено / Частично / Нет', value: `${totals.paid_count} / ${totals.partial_count} / ${totals.unpaid_count}`, color: 'gray' },
+            { label: t.cardVouchers, value: fmtNum(totals.voucher_count), color: 'blue' },
+            { label: t.cardSale, value: fmt(totals.total_sale), color: 'green' },
+            { label: t.cardNet, value: fmt(totals.total_net), color: 'gray' },
+            { label: t.cardProfit, value: fmt(totals.profit), color: Number(totals.profit) >= 0 ? 'green' : 'red' },
+            { label: t.cardPaid, value: fmt(totals.total_paid), color: 'blue' },
+            { label: t.cardCashOnTour, value: fmt(totals.total_cash_on_tour), color: 'yellow' },
+            { label: t.cardPassengers, value: fmtNum(totals.total_pax), color: 'purple' },
+            { label: t.cardPaymentStatus, value: `${totals.paid_count} / ${totals.partial_count} / ${totals.unpaid_count}`, color: 'gray' },
           ].map(card => (
             <div key={card.label} className="bg-white rounded-lg shadow-sm p-4">
               <p className="text-xs text-gray-500">{card.label}</p>
@@ -166,19 +190,19 @@ const ReportsPage: React.FC = () => {
             onClick={() => setTab('summary')}
             className={`px-4 py-2 text-sm font-medium rounded-t-lg ${tab === 'summary' ? 'bg-blue-50 text-blue-700 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
           >
-            Сводная
+            {t.reportsTabSummary}
           </button>
           <button
             onClick={() => setTab('payments')}
             className={`px-4 py-2 text-sm font-medium rounded-t-lg ${tab === 'payments' ? 'bg-blue-50 text-blue-700 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
           >
-            Платежи
+            {t.reportsTabPayments}
           </button>
         </div>
 
         <div className="p-4">
           {loading ? (
-            <div className="py-8 text-center text-gray-400">Загрузка...</div>
+            <div className="py-8 text-center text-gray-400">{t.reportsLoading}</div>
           ) : tab === 'summary' ? (
             <>
               {/* Group selector */}
@@ -189,64 +213,63 @@ const ReportsPage: React.FC = () => {
                     onClick={() => setGroupBy(g)}
                     className={`px-3 py-1 text-xs rounded-full font-medium ${groupBy === g ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
                   >
-                    {{ manager: 'По менеджерам', company: 'По компаниям', tour: 'По турам', day: 'По дням' }[g]}
+                    {groupLabels[g]}
                   </button>
                 ))}
               </div>
 
               {rows.length === 0 ? (
-                <div className="py-6 text-center text-gray-400">Нет данных</div>
+                <div className="py-6 text-center text-gray-400">{t.reportsNoData}</div>
               ) : groupBy === 'manager' ? (
-                <SummaryTable rows={rows} columns={[
-                  { key: 'manager_name', label: 'Менеджер' },
-                  { key: 'voucher_count', label: 'Ваучеров', num: true },
-                  { key: 'total_sale', label: 'Sale', money: true },
-                  { key: 'total_net', label: 'Nett', money: true },
-                  { key: 'profit', label: 'Прибыль', money: true, highlight: true },
-                  { key: 'total_paid', label: 'Оплачено', money: true },
+                <SummaryTable rows={rows} total={t.reportsTotal} columns={[
+                  { key: 'manager_name', label: t.sumManager },
+                  { key: 'voucher_count', label: t.sumVouchers, num: true },
+                  { key: 'total_sale', label: t.sumSale, money: true },
+                  { key: 'total_net', label: t.sumNet, money: true },
+                  { key: 'profit', label: t.sumProfit, money: true, highlight: true },
+                  { key: 'total_paid', label: t.sumPaid, money: true },
                   { key: 'paid_count', label: '✓', num: true },
                   { key: 'partial_count', label: '~', num: true },
                   { key: 'unpaid_count', label: '✗', num: true },
                 ]} />
               ) : groupBy === 'company' ? (
-                <SummaryTable rows={rows} columns={[
-                  { key: 'company_name', label: 'Компания' },
-                  { key: 'voucher_count', label: 'Ваучеров', num: true },
-                  { key: 'total_pax', label: 'Пассажиров', num: true },
-                  { key: 'total_sale', label: 'Sale', money: true },
-                  { key: 'total_net', label: 'Nett', money: true },
-                  { key: 'profit', label: 'Прибыль', money: true, highlight: true },
+                <SummaryTable rows={rows} total={t.reportsTotal} columns={[
+                  { key: 'company_name', label: t.sumCompany },
+                  { key: 'voucher_count', label: t.sumVouchers, num: true },
+                  { key: 'total_pax', label: t.sumPax, num: true },
+                  { key: 'total_sale', label: t.sumSale, money: true },
+                  { key: 'total_net', label: t.sumNet, money: true },
+                  { key: 'profit', label: t.sumProfit, money: true, highlight: true },
                 ]} />
               ) : groupBy === 'tour' ? (
-                <SummaryTable rows={rows} columns={[
-                  { key: 'tour_name', label: 'Тур' },
-                  { key: 'tour_type', label: 'Тип' },
-                  { key: 'voucher_count', label: 'Ваучеров', num: true },
-                  { key: 'total_pax', label: 'Пассажиров', num: true },
-                  { key: 'total_sale', label: 'Sale', money: true },
-                  { key: 'profit', label: 'Прибыль', money: true, highlight: true },
+                <SummaryTable rows={rows} total={t.reportsTotal} columns={[
+                  { key: 'tour_name', label: t.sumTour },
+                  { key: 'tour_type', label: t.sumTourType },
+                  { key: 'voucher_count', label: t.sumVouchers, num: true },
+                  { key: 'total_pax', label: t.sumPax, num: true },
+                  { key: 'total_sale', label: t.sumSale, money: true },
+                  { key: 'profit', label: t.sumProfit, money: true, highlight: true },
                 ]} />
               ) : (
-                <SummaryTable rows={rows} columns={[
-                  { key: 'date', label: 'Дата', date: true },
-                  { key: 'voucher_count', label: 'Ваучеров', num: true },
-                  { key: 'total_pax', label: 'Пассажиров', num: true },
-                  { key: 'total_sale', label: 'Sale', money: true },
-                  { key: 'total_net', label: 'Nett', money: true },
-                  { key: 'profit', label: 'Прибыль', money: true, highlight: true },
+                <SummaryTable rows={rows} total={t.reportsTotal} columns={[
+                  { key: 'date', label: t.sumDate, date: true },
+                  { key: 'voucher_count', label: t.sumVouchers, num: true },
+                  { key: 'total_pax', label: t.sumPax, num: true },
+                  { key: 'total_sale', label: t.sumSale, money: true },
+                  { key: 'total_net', label: t.sumNet, money: true },
+                  { key: 'profit', label: t.sumProfit, money: true, highlight: true },
                 ]} />
               )}
             </>
           ) : (
-            /* Payments tab */
             payments.length === 0 ? (
-              <div className="py-6 text-center text-gray-400">Нет платежей</div>
+              <div className="py-6 text-center text-gray-400">{t.reportsNoPayments}</div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50">
                     <tr>
-                      {['Дата', 'Ваучер', 'Дата тура', 'Клиент', 'Телефон', 'Менеджер', 'Сумма', 'Валюта', 'Метод', 'Примечание'].map(h => (
+                      {[t.payDate, t.payVoucher, t.payTourDate, t.payClient, t.payPhone, t.payManager, t.payAmount, t.payCurrency, t.payMethod, t.payNotes].map(h => (
                         <th key={h} className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase">{h}</th>
                       ))}
                     </tr>
@@ -269,7 +292,7 @@ const ReportsPage: React.FC = () => {
                   </tbody>
                   <tfoot className="bg-gray-50 font-semibold">
                     <tr>
-                      <td colSpan={6} className="px-3 py-2 text-right text-xs">Итого:</td>
+                      <td colSpan={6} className="px-3 py-2 text-right text-xs">{t.payTotalLabel}</td>
                       <td className="px-3 py-2 text-right">
                         ฿{payments.reduce((s, p) => s + Number(p.amount || 0), 0).toLocaleString('ru', { minimumFractionDigits: 0 })}
                       </td>
@@ -288,7 +311,7 @@ const ReportsPage: React.FC = () => {
 
 type ColDef = { key: string; label: string; money?: boolean; num?: boolean; highlight?: boolean; date?: boolean };
 
-const SummaryTable: React.FC<{ rows: any[]; columns: ColDef[] }> = ({ rows, columns }) => (
+const SummaryTable: React.FC<{ rows: any[]; columns: ColDef[]; total: string }> = ({ rows, columns, total }) => (
   <div className="overflow-x-auto">
     <table className="w-full text-sm">
       <thead className="bg-gray-50">
@@ -320,7 +343,7 @@ const SummaryTable: React.FC<{ rows: any[]; columns: ColDef[] }> = ({ rows, colu
           {columns.map((c, i) => (
             <td key={c.key} className={`px-3 py-2 ${c.money || c.num ? 'text-right' : ''}`}>
               {i === 0
-                ? `Итого (${rows.length})`
+                ? `${total} (${rows.length})`
                 : c.money
                 ? `฿${rows.reduce((s, r) => s + Number(r[c.key] || 0), 0).toLocaleString('ru', { minimumFractionDigits: 0 })}`
                 : c.num

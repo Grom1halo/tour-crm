@@ -32,6 +32,9 @@ export const getCurrentUser = () => api.get('/auth/me');
 // Users
 export const getManagers = () => api.get('/users/managers');
 export const updateManagerPhone = (managerPhone: string) => api.put('/users/phone', { managerPhone });
+export const createUser = (data: any) => api.post('/users', data);
+export const updateUser = (id: number, data: any) => api.put(`/users/${id}`, data);
+export const deleteUser = (id: number) => api.delete(`/users/${id}`);
 
 // Clients
 export const getClients = (search?: string) => api.get('/clients', { params: { search } });
@@ -51,6 +54,8 @@ export const getTourPrices = (tourId: number, companyId: number, date: string) =
   api.get('/vouchers/prices/lookup', { params: { tourId, companyId, date } });
 export const getToursByCompany = (companyId: number) =>
   api.get(`/vouchers/by-company/${companyId}`);
+export const getCompaniesByTour = (tourId: number) =>
+  api.get(`/vouchers/by-tour/${tourId}`);
 
 // Payments
 export const addPayment = (data: any) => api.post('/payments', data);
@@ -78,10 +83,18 @@ export const getTourPricesList = (tourId?: number, companyId?: number) =>
   api.get('/tour-prices', { params: { tourId, companyId, activeOnly: true } });
 export const createTourPrice = (data: any) => api.post('/tour-prices', data);
 export const updateTourPrice = (id: number, data: any) => api.put(`/tour-prices/${id}`, data);
+export const deleteTourPrice = (id: number) => api.delete(`/tour-prices/${id}`);
 
 // Agents
 export const getAgents = (activeOnly = true) => api.get('/agents', { params: { activeOnly } });
 export const createAgent = (data: any) => api.post('/agents', data);
 export const updateAgent = (id: number, data: any) => api.put(`/agents/${id}`, data);
+export const deleteAgent = (id: number) => api.delete(`/agents/${id}`);
+
+// Seasons
+export const getSeasons = () => api.get('/seasons');
+export const createSeason = (data: any) => api.post('/seasons', data);
+export const updateSeason = (id: number, data: any) => api.put(`/seasons/${id}`, data);
+export const deleteSeason = (id: number) => api.delete(`/seasons/${id}`);
 
 export default api;

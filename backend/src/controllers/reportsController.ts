@@ -12,8 +12,8 @@ export const getSummaryReport = async (req: AuthRequest, res: Response) => {
     let p = 1;
 
     let dateFilter = '';
-    if (dateFrom) { dateFilter += ` AND v.tour_date >= $${p++}`; params.push(dateFrom); }
-    if (dateTo)   { dateFilter += ` AND v.tour_date <= $${p++}`; params.push(dateTo); }
+    if (dateFrom) { dateFilter += ` AND v.created_at::date >= $${p++}`; params.push(dateFrom); }
+    if (dateTo)   { dateFilter += ` AND v.created_at::date <= $${p++}`; params.push(dateTo); }
 
     let managerFilter = '';
     if (user.role === 'manager') {
@@ -91,7 +91,7 @@ export const getSummaryReport = async (req: AuthRequest, res: Response) => {
     } else if (groupBy === 'day') {
       const result = await pool.query(
         `SELECT
-          v.tour_date::date as date,
+          v.created_at::date as date,
           COUNT(v.id) as voucher_count,
           SUM(v.adults + v.children) as total_pax,
           SUM(v.total_sale) as total_sale,
@@ -99,7 +99,7 @@ export const getSummaryReport = async (req: AuthRequest, res: Response) => {
           SUM(v.total_sale - v.total_net) as profit
         FROM vouchers v
         WHERE v.is_deleted = false ${dateFilter} ${managerFilter}
-        GROUP BY v.tour_date::date
+        GROUP BY v.created_at::date
         ORDER BY date DESC`,
         params
       );
@@ -125,8 +125,8 @@ export const getReportTotals = async (req: AuthRequest, res: Response) => {
     let p = 1;
     let filters = '';
 
-    if (dateFrom) { filters += ` AND v.tour_date >= $${p++}`; params.push(dateFrom); }
-    if (dateTo)   { filters += ` AND v.tour_date <= $${p++}`; params.push(dateTo); }
+    if (dateFrom) { filters += ` AND v.created_at::date >= $${p++}`; params.push(dateFrom); }
+    if (dateTo)   { filters += ` AND v.created_at::date <= $${p++}`; params.push(dateTo); }
 
     if (user.role === 'manager') {
       filters += ` AND v.manager_id = $${p++}`;

@@ -18,6 +18,9 @@ router.get('/auth/me', authenticate, authController.getCurrentUser);
 // ===== USERS =====
 router.get('/users/managers', authenticate, usersController.getManagers);
 router.put('/users/phone', authenticate, usersController.updateManagerPhone);
+router.post('/users', authenticate, authorize('admin'), usersController.createUser);
+router.put('/users/:id', authenticate, authorize('admin'), usersController.updateUser);
+router.delete('/users/:id', authenticate, authorize('admin'), usersController.deleteUser);
 
 // ===== CLIENTS =====
 router.get('/clients', authenticate, clientController.getClients);
@@ -28,6 +31,7 @@ router.delete('/clients/:id', authenticate, authorize('manager', 'admin'), clien
 // ===== VOUCHERS =====
 router.get('/vouchers/prices/lookup', authenticate, voucherController.getTourPrices);
 router.get('/vouchers/by-company/:companyId', authenticate, voucherController.getToursByCompany);
+router.get('/vouchers/by-tour/:tourId', authenticate, voucherController.getCompaniesByTour);
 router.get('/vouchers', authenticate, voucherController.getVouchers);
 router.get('/vouchers/:id', authenticate, voucherController.getVoucherById);
 router.post('/vouchers', authenticate, authorize('manager', 'admin'), voucherController.createVoucher);
@@ -49,19 +53,26 @@ router.get('/reports/export/daily', authenticate, exportController.exportDailyAc
 
 // ===== REFERENCE DATA =====
 router.get('/companies', authenticate, referenceController.getCompanies);
-router.post('/companies', authenticate, authorize('admin'), referenceController.createCompany);
+router.post('/companies', authenticate, authorize('admin', 'manager'), referenceController.createCompany);
 router.put('/companies/:id', authenticate, authorize('admin'), referenceController.updateCompany);
 
 router.get('/tours', authenticate, referenceController.getTours);
-router.post('/tours', authenticate, authorize('admin'), referenceController.createTour);
+router.post('/tours', authenticate, authorize('admin', 'manager'), referenceController.createTour);
 router.put('/tours/:id', authenticate, authorize('admin'), referenceController.updateTour);
 
 router.get('/tour-prices', authenticate, referenceController.getTourPricesList);
 router.post('/tour-prices', authenticate, authorize('admin'), referenceController.createTourPrice);
 router.put('/tour-prices/:id', authenticate, authorize('admin'), referenceController.updateTourPrice);
+router.delete('/tour-prices/:id', authenticate, authorize('admin'), referenceController.deleteTourPrice);
 
 router.get('/agents', authenticate, referenceController.getAgents);
 router.post('/agents', authenticate, authorize('admin'), referenceController.createAgent);
 router.put('/agents/:id', authenticate, authorize('admin'), referenceController.updateAgent);
+router.delete('/agents/:id', authenticate, authorize('admin'), referenceController.deleteAgent);
+
+router.get('/seasons', authenticate, referenceController.getSeasons);
+router.post('/seasons', authenticate, authorize('admin'), referenceController.createSeason);
+router.put('/seasons/:id', authenticate, authorize('admin'), referenceController.updateSeason);
+router.delete('/seasons/:id', authenticate, authorize('admin'), referenceController.deleteSeason);
 
 export default router;

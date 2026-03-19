@@ -34,3 +34,9 @@ logs/
 
 # Docker volumes
 postgres_data/
+
+# SQL dumps with client data
+voucher_dump.sql
+*_only.sql
+ci19820*.sql
+cn81466*.sql
