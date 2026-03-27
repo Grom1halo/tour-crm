@@ -50,15 +50,17 @@ router.get('/reports/totals', authenticate, reportsController.getReportTotals);
 router.get('/reports/summary', authenticate, reportsController.getSummaryReport);
 router.get('/reports/payments', authenticate, reportsController.getPaymentsReport);
 router.get('/reports/export/daily', authenticate, exportController.exportDailyAccounting);
+router.get('/reports/export/manager', authenticate, exportController.exportManagerReport);
+router.get('/reports/export/html', authenticate, exportController.exportHtmlReport);
 
 // ===== REFERENCE DATA =====
 router.get('/companies', authenticate, referenceController.getCompanies);
-router.post('/companies', authenticate, authorize('admin', 'manager'), referenceController.createCompany);
-router.put('/companies/:id', authenticate, authorize('admin'), referenceController.updateCompany);
+router.post('/companies', authenticate, authorize('admin', 'manager', 'editor'), referenceController.createCompany);
+router.put('/companies/:id', authenticate, authorize('admin', 'editor'), referenceController.updateCompany);
 
 router.get('/tours', authenticate, referenceController.getTours);
-router.post('/tours', authenticate, authorize('admin', 'manager'), referenceController.createTour);
-router.put('/tours/:id', authenticate, authorize('admin'), referenceController.updateTour);
+router.post('/tours', authenticate, authorize('admin', 'manager', 'editor'), referenceController.createTour);
+router.put('/tours/:id', authenticate, authorize('admin', 'editor'), referenceController.updateTour);
 
 router.get('/tour-prices', authenticate, referenceController.getTourPricesList);
 router.post('/tour-prices', authenticate, authorize('admin'), referenceController.createTourPrice);

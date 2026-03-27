@@ -7,7 +7,16 @@ const ROLE_COLORS: Record<string, string> = {
   manager:    'bg-blue-100 text-blue-700',
   hotline:    'bg-green-100 text-green-700',
   accountant: 'bg-yellow-100 text-yellow-700',
+  editor:     'bg-orange-100 text-orange-700',
 };
+
+const ALL_ROLES = [
+  { value: 'manager',    label: 'Менеджер' },
+  { value: 'editor',     label: 'Редактор' },
+  { value: 'hotline',    label: 'Хотлайн' },
+  { value: 'accountant', label: 'Бухгалтер' },
+  { value: 'admin',      label: 'Администратор' },
+];
 
 const ManagersPage: React.FC = () => {
   const { t } = useLanguage();
@@ -19,7 +28,7 @@ const ManagersPage: React.FC = () => {
     fullName: '',
     username: '',
     password: '',
-    role: 'manager',
+    roles: ['manager'] as string[],
     managerNumber: '',
     managerPhone: '',
     commissionPercentage: 0,
@@ -37,7 +46,7 @@ const ManagersPage: React.FC = () => {
 
   const openCreate = () => {
     setEditing(null);
-    setFormData({ fullName: '', username: '', password: '', role: 'manager', managerNumber: '', managerPhone: '', commissionPercentage: 0, isActive: true });
+    setFormData({ fullName: '', username: '', password: '', roles: ['manager'], managerNumber: '', managerPhone: '', commissionPercentage: 0, isActive: true });
     setShowModal(true);
   };
 
@@ -47,7 +56,7 @@ const ManagersPage: React.FC = () => {
       fullName: u.full_name,
       username: u.username,
       password: '',
-      role: u.role,
+      roles: (u.roles && u.roles.length > 0) ? u.roles : [u.role],
       managerNumber: u.manager_number || '',
       managerPhone: u.manager_phone || '',
       commissionPercentage: Number(u.commission_percentage) || 0,
@@ -60,11 +69,13 @@ const ManagersPage: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (formData.roles.length === 0) { alert('Выберите хотя бы одну роль'); return; }
     try {
+      const payload = { ...formData, role: formData.roles[0] };
       if (editing) {
-        await api.updateUser(editing.id, formData);
+        await api.updateUser(editing.id, payload);
       } else {
-        await api.createUser(formData);
+        await api.createUser(payload);
       }
       closeModal();
       load();
@@ -140,9 +151,13 @@ const ManagersPage: React.FC = () => {
                 <td className="px-4 py-3 font-medium text-gray-800">{u.full_name}</td>
                 <td className="px-4 py-3 text-gray-500 font-mono text-xs">{u.username}</td>
                 <td className="px-4 py-3">
-                  <span className={`px-2 py-1 rounded-full text-xs font-semibold ${ROLE_COLORS[u.role] || 'bg-gray-100 text-gray-600'}`}>
-                    {u.role}
-                  </span>
+                  <div className="flex flex-wrap gap-1">
+                    {((u.roles && u.roles.length > 0) ? u.roles : [u.role]).map((r: string) => (
+                      <span key={r} className={`px-2 py-0.5 rounded-full text-xs font-semibold ${ROLE_COLORS[r] || 'bg-gray-100 text-gray-600'}`}>
+                        {r}
+                      </span>
+                    ))}
+                  </div>
                 </td>
                 <td className="px-4 py-3 text-gray-600">{u.manager_phone || '—'}</td>
                 <td className="px-4 py-3 text-right text-gray-600">{u.commission_percentage}%</td>
@@ -180,14 +195,26 @@ const ManagersPage: React.FC = () => {
                     placeholder="01"
                   />
                 </div>
-                <div>
-                  <label className={labelCls}>{t.managersRoleLabel}</label>
-                  <select value={formData.role} onChange={e => setFormData({ ...formData, role: e.target.value })} className={inputCls}>
-                    <option value="manager">{t.managersRoleManager}</option>
-                    <option value="admin">{t.managersRoleAdmin}</option>
-                    <option value="hotline">{t.managersRoleHotline}</option>
-                    <option value="accountant">{t.managersRoleAccountant}</option>
-                  </select>
+                <div className="col-span-2">
+                  <label className={labelCls}>Роли (можно несколько)</label>
+                  <div className="flex flex-wrap gap-2 mt-1">
+                    {ALL_ROLES.map(({ value, label }) => (
+                      <label key={value} className="flex items-center gap-1.5 cursor-pointer select-none text-sm">
+                        <input
+                          type="checkbox"
+                          checked={formData.roles.includes(value)}
+                          onChange={e => {
+                            const next = e.target.checked
+                              ? [...formData.roles, value]
+                              : formData.roles.filter(r => r !== value);
+                            if (next.length > 0) setFormData({ ...formData, roles: next });
+                          }}
+                          className="w-4 h-4"
+                        />
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${ROLE_COLORS[value]}`}>{label}</span>
+                      </label>
+                    ))}
+                  </div>
                 </div>
               </div>
               <div>

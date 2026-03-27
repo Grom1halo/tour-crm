@@ -29,9 +29,10 @@ const ReportsPage: React.FC = () => {
   });
   const [exportDateTo, setExportDateTo] = useState(() => new Date().toISOString().split('T')[0]);
   const [exporting, setExporting] = useState(false);
+  const [dateType, setDateType] = useState<'sale' | 'tour'>('sale');
 
   useEffect(() => {
-    if (user?.role !== 'manager') {
+    if (!user?.roles?.includes('manager') || user?.roles?.includes('admin')) {
       api.getManagers().then(r => {
         // Only show active managers
         setManagers((r.data as any[]).filter((m: any) => m.is_active !== false));
@@ -41,12 +42,12 @@ const ReportsPage: React.FC = () => {
 
   useEffect(() => {
     loadReport();
-  }, [tab, groupBy, managerId, dateFrom, dateTo]);
+  }, [tab, groupBy, managerId, dateFrom, dateTo, dateType]);
 
   const loadReport = async () => {
     setLoading(true);
     try {
-      const params = { dateFrom, dateTo, managerId: managerId || undefined };
+      const params = { dateFrom, dateTo, managerId: managerId || undefined, dateType };
       const [totalsRes] = await Promise.all([api.getReportTotals(params)]);
       setTotals(totalsRes.data);
 
@@ -86,6 +87,43 @@ const ReportsPage: React.FC = () => {
     } finally {
       setExporting(false);
     }
+  };
+
+  const handleManagerExport = async () => {
+    setExporting(true);
+    try {
+      const token = localStorage.getItem('token');
+      const params = new URLSearchParams({ dateFrom: exportDateFrom, dateTo: exportDateTo });
+      if (managerId) params.append('managerId', managerId);
+      const res = await fetch(`/api/reports/export/manager?${params}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Export failed');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `manager_${exportDateFrom}_${exportDateTo}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      alert('Ошибка экспорта');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleHtmlReport = () => {
+    const token = localStorage.getItem('token');
+    const params = new URLSearchParams({ dateFrom: exportDateFrom, dateTo: exportDateTo });
+    if (managerId) params.append('managerId', managerId);
+    // Open HTML report in new tab with token in header (via fetch + blob URL)
+    fetch(`/api/reports/export/html?${params}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then(r => r.blob()).then(blob => {
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+    });
   };
 
   const fmt = (v: any) => v ? `฿${Number(v).toLocaleString('ru', { minimumFractionDigits: 0 })}` : '฿0';
@@ -133,6 +171,19 @@ const ReportsPage: React.FC = () => {
           >
             {exporting ? t.reportsExporting : t.reportsExportBtn}
           </button>
+          <button
+            onClick={handleManagerExport}
+            disabled={exporting}
+            className="flex items-center gap-2 px-4 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 transition disabled:opacity-50"
+          >
+            Менеджер XLS
+          </button>
+          <button
+            onClick={handleHtmlReport}
+            className="flex items-center gap-2 px-4 py-1.5 bg-purple-600 text-white rounded-lg text-sm font-semibold hover:bg-purple-700 transition"
+          >
+            HTML
+          </button>
         </div>
       </div>
 
@@ -147,7 +198,7 @@ const ReportsPage: React.FC = () => {
             <label className="block text-xs text-gray-500 mb-1">{t.reportsDateTo}</label>
             <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className={inputCls} />
           </div>
-          {user?.role !== 'manager' && (
+          {(!user?.roles?.includes('manager') || user?.roles?.includes('admin')) && (
             <div>
               <label className="block text-xs text-gray-500 mb-1">{t.reportsManager}</label>
               <select value={managerId} onChange={e => setManagerId(e.target.value)} className={inputCls}>
@@ -156,6 +207,13 @@ const ReportsPage: React.FC = () => {
               </select>
             </div>
           )}
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Тип даты</label>
+            <div className="flex rounded-lg border border-gray-300 overflow-hidden text-sm">
+              <button onClick={() => setDateType('sale')} className={`px-3 py-2 ${dateType === 'sale' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>По продаже</button>
+              <button onClick={() => setDateType('tour')} className={`px-3 py-2 ${dateType === 'tour' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>По выезду</button>
+            </div>
+          </div>
           <button onClick={loadReport} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">
             {t.reportsRefresh}
           </button>
@@ -223,10 +281,15 @@ const ReportsPage: React.FC = () => {
               ) : groupBy === 'manager' ? (
                 <SummaryTable rows={rows} total={t.reportsTotal} columns={[
                   { key: 'manager_name', label: t.sumManager },
+                  { key: 'tour_name', label: t.sumTour },
                   { key: 'voucher_count', label: t.sumVouchers, num: true },
                   { key: 'total_sale', label: t.sumSale, money: true },
                   { key: 'total_net', label: t.sumNet, money: true },
                   { key: 'profit', label: t.sumProfit, money: true, highlight: true },
+                  ...(!user?.roles?.includes('manager') || user?.roles?.includes('admin') ? [
+                    { key: 'profit_after_agent', label: 'Профит−Агент', money: true },
+                    { key: 'manager_pay', label: 'Зарплата', money: true },
+                  ] : []),
                   { key: 'total_paid', label: t.sumPaid, money: true },
                   { key: 'paid_count', label: '✓', num: true },
                   { key: 'partial_count', label: '~', num: true },
@@ -235,6 +298,7 @@ const ReportsPage: React.FC = () => {
               ) : groupBy === 'company' ? (
                 <SummaryTable rows={rows} total={t.reportsTotal} columns={[
                   { key: 'company_name', label: t.sumCompany },
+                  { key: 'tour_name', label: t.sumTour },
                   { key: 'voucher_count', label: t.sumVouchers, num: true },
                   { key: 'total_pax', label: t.sumPax, num: true },
                   { key: 'total_sale', label: t.sumSale, money: true },

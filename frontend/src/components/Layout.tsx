@@ -4,19 +4,20 @@ import { useAuth } from '../contexts/AuthContext';
 import { useLanguage } from '../i18n/LanguageContext';
 
 const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { user, logout } = useAuth();
+  const { user, logout, hasRole } = useAuth();
   const location = useLocation();
   const { t, lang, setLang } = useLanguage();
 
   const isActive = (path: string) => location.pathname === path;
 
   const navItems = [
-    { path: '/',          label: t.navVouchers,  roles: ['manager', 'admin', 'hotline', 'accountant'] },
-    { path: '/clients',   label: t.navClients,   roles: ['manager', 'admin'] },
+    { path: '/',          label: t.navVouchers,  roles: ['manager', 'admin', 'hotline', 'accountant', 'editor'] },
+    { path: '/clients',   label: t.navClients,   roles: ['manager', 'admin', 'editor'] },
     { path: '/reports',   label: t.navReports,   roles: ['manager', 'admin', 'accountant'] },
-    { path: '/companies', label: t.navCompanies, roles: ['admin'] },
-    { path: '/tours',     label: t.navTours,     roles: ['admin'] },
-    { path: '/agents',    label: t.navAgents,    roles: ['admin', 'manager'] },
+    { path: '/hotline',   label: 'Хотлайн',      roles: ['admin', 'manager', 'hotline'] },
+    { path: '/companies', label: t.navCompanies, roles: ['admin', 'editor'] },
+    { path: '/tours',     label: t.navTours,     roles: ['admin', 'editor'] },
+    { path: '/agents',    label: t.navAgents,    roles: ['admin', 'manager', 'editor'] },
     { path: '/managers',  label: t.navManagers,  roles: ['admin'] },
   ];
 
@@ -31,7 +32,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
               </Link>
               <nav className="hidden md:flex space-x-1">
                 {navItems
-                  .filter(item => !user || item.roles.includes(user.role))
+                  .filter(item => !user || item.roles.some(r => hasRole(r)))
                   .map(item => (
                     <Link
                       key={item.path}
@@ -65,7 +66,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
               </div>
               <div className="text-right">
                 <p className="text-sm font-medium text-gray-700">{user?.fullName}</p>
-                <p className="text-xs text-gray-500 capitalize">{user?.role}</p>
+                <p className="text-xs text-gray-500 capitalize">{user?.roles?.join(', ') || user?.role}</p>
               </div>
               <button
                 onClick={logout}

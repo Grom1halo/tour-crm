@@ -12,7 +12,7 @@ export const login = async (req: Request, res: Response) => {
     }
 
     const result = await pool.query(
-      'SELECT id, username, password_hash, full_name, role, commission_percentage FROM users WHERE username = $1 AND is_active = true',
+      'SELECT id, username, password_hash, full_name, role, roles, commission_percentage FROM users WHERE username = $1 AND is_active = true',
       [username]
     );
 
@@ -30,10 +30,12 @@ export const login = async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
+    const userRoles: string[] = (user.roles && user.roles.length > 0) ? user.roles : [user.role];
+
     const token = jwt.sign(
-      { id: user.id, username: user.username, role: user.role },
+      { id: user.id, username: user.username, role: user.role, roles: userRoles },
       process.env.JWT_SECRET || 'secret',
-      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+      { expiresIn: (process.env.JWT_EXPIRES_IN || '7d') as any }
     );
 
     res.json({
@@ -43,6 +45,7 @@ export const login = async (req: Request, res: Response) => {
         username: user.username,
         fullName: user.full_name,
         role: user.role,
+        roles: userRoles,
         commissionPercentage: user.commission_percentage,
       },
     });
@@ -55,7 +58,7 @@ export const login = async (req: Request, res: Response) => {
 export const getCurrentUser = async (req: any, res: Response) => {
   try {
     const result = await pool.query(
-      'SELECT id, username, full_name, role, commission_percentage FROM users WHERE id = $1',
+      'SELECT id, username, full_name, role, roles, commission_percentage FROM users WHERE id = $1',
       [req.user.id]
     );
 
@@ -64,11 +67,13 @@ export const getCurrentUser = async (req: any, res: Response) => {
     }
 
     const user = result.rows[0];
+    const userRoles: string[] = (user.roles && user.roles.length > 0) ? user.roles : [user.role];
     res.json({
       id: user.id,
       username: user.username,
       fullName: user.full_name,
       role: user.role,
+      roles: userRoles,
       commissionPercentage: user.commission_percentage,
     });
   } catch (error) {

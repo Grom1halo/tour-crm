@@ -443,17 +443,30 @@ const ToursPage: React.FC = () => {
                 <div>
                   <label className={labelCls + ' mb-2'}>{t.toursCancellationTermsLabel}</label>
                   <div className="border border-gray-200 rounded-lg p-3 bg-gray-50 space-y-2">
-                    {CANCEL_PRESETS.map(preset => (
-                      <label key={preset} className="flex items-start gap-2 cursor-pointer group">
-                        <input
-                          type="checkbox"
-                          checked={formData.cancellationTerms.includes(preset)}
-                          onChange={() => togglePreset(preset)}
-                          className="w-4 h-4 mt-0.5 flex-shrink-0"
-                        />
-                        <span className="text-sm text-gray-700 group-hover:text-gray-900">{preset}</span>
-                      </label>
-                    ))}
+                    {CANCEL_PRESETS.map(preset => {
+                      const checked = formData.cancellationTerms.includes(preset);
+                      return (
+                        <div key={preset} className="flex items-start gap-2 group">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => togglePreset(preset)}
+                            className="w-4 h-4 mt-0.5 flex-shrink-0 cursor-pointer"
+                          />
+                          <span
+                            className="text-sm text-gray-700 group-hover:text-gray-900 cursor-pointer flex-1"
+                            onClick={() => togglePreset(preset)}
+                          >{preset}</span>
+                          {checked && (
+                            <button
+                              type="button"
+                              onClick={() => togglePreset(preset)}
+                              className="text-red-400 hover:text-red-600 font-bold text-lg leading-none flex-shrink-0"
+                            >×</button>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
 
                   {/* Custom terms */}

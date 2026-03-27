@@ -6,12 +6,14 @@ interface User {
   username: string;
   fullName: string;
   role: string;
+  roles: string[];
   commissionPercentage?: number;
 }
 
 interface AuthContextType {
   user: User | null;
   loading: boolean;
+  hasRole: (...roles: string[]) => boolean;
   login: (username: string, password: string) => Promise<void>;
   logout: () => void;
 }
@@ -27,7 +29,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const savedUser = localStorage.getItem('user');
 
     if (token && savedUser) {
-      setUser(JSON.parse(savedUser));
+      const u = JSON.parse(savedUser);
+      if (!u.roles || u.roles.length === 0) u.roles = [u.role];
+      setUser(u);
     }
     setLoading(false);
   }, []);
@@ -35,11 +39,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const login = async (username: string, password: string) => {
     try {
       const response = await api.login(username, password);
-      const { token, user } = response.data;
+      const { token, user: u } = response.data;
+      // Normalise roles
+      if (!u.roles || u.roles.length === 0) u.roles = [u.role];
 
       localStorage.setItem('token', token);
-      localStorage.setItem('user', JSON.stringify(user));
-      setUser(user);
+      localStorage.setItem('user', JSON.stringify(u));
+      setUser(u);
     } catch (error: any) {
       throw new Error(error.response?.data?.error || 'Login failed');
     }
@@ -52,8 +58,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     window.location.href = '/login';
   };
 
+  const hasRole = (...roles: string[]) => {
+    if (!user) return false;
+    const userRoles = user.roles || [user.role];
+    return roles.some(r => userRoles.includes(r));
+  };
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout }}>
+    <AuthContext.Provider value={{ user, loading, hasRole, login, logout }}>
       {children}
     </AuthContext.Provider>
   );

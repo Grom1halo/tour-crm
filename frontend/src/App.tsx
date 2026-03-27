@@ -13,6 +13,7 @@ import CompaniesPage from './pages/CompaniesPage';
 import ToursPage from './pages/ToursPage';
 import AgentsPage from './pages/AgentsPage';
 import ManagersPage from './pages/ManagersPage';
+import HotlinePage from './pages/HotlinePage';
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, loading } = useAuth();
@@ -38,6 +39,7 @@ function App() {
             <Route path="/tours" element={<ProtectedRoute><ToursPage /></ProtectedRoute>} />
             <Route path="/agents" element={<ProtectedRoute><AgentsPage /></ProtectedRoute>} />
             <Route path="/managers" element={<ProtectedRoute><ManagersPage /></ProtectedRoute>} />
+            <Route path="/hotline" element={<ProtectedRoute><HotlinePage /></ProtectedRoute>} />
           </Routes>
         </BrowserRouter>
       </AuthProvider>

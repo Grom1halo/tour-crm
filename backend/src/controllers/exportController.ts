@@ -71,7 +71,8 @@ export const exportDailyAccounting = async (req: AuthRequest, res: Response) => 
     const params: any[] = [dateFrom, dateTo || dateFrom];
     let managerFilter = '';
 
-    if (user.role === 'manager') {
+    const userRoles = user.roles || [user.role];
+    if (userRoles.includes('manager') && !userRoles.includes('admin')) {
       managerFilter = ` AND v.manager_id = $3`;
       params.push(user.id);
     } else if (managerId) {
@@ -92,7 +93,7 @@ export const exportDailyAccounting = async (req: AuthRequest, res: Response) => 
         v.agent_commission_percentage, v.created_at as sale_date,
         c.name as client_name, c.phone as client_phone,
         co.name as company_name, t.name as tour_name,
-        u.full_name as manager_name, u.manager_phone,
+        u.full_name as manager_name, u.manager_phone, u.commission_percentage as manager_commission_percentage,
         a.name as agent_name
       FROM vouchers v
       LEFT JOIN clients c ON v.client_id = c.id
@@ -165,11 +166,10 @@ export const exportDailyAccounting = async (req: AuthRequest, res: Response) => 
 
     // Headers row 4
     const vHeaders = [
-      'Ваучер №', 'Важный', 'Статус', 'Компания', 'Тур', 'Менеджер',
-      'Клиент', 'Телефон', 'Отель / Комната',
-      'Время', 'Взр.', 'Дет.', 'Мл.',
+      'Ваучер №', 'Статус', 'Компания', 'Тур', 'Менеджер',
+      'Взр.', 'Дет.', 'Мл.',
       'Sale (฿)', 'Net (฿)', 'Оплачено (฿)', 'Наличные (฿)',
-      'Агент', 'Примечания',
+      'Агент', 'Профит (฿)', 'Профит - агент (฿)', 'Оплата менеджеру (฿)', 'Примечания',
     ];
     vHeaders.forEach((h, i) => hdr(ws1, 4, i + 1, h));
     ws1.getRow(4).height = 36;
@@ -187,38 +187,43 @@ export const exportDailyAccounting = async (req: AuthRequest, res: Response) => 
       const statusBg = v.payment_status === 'paid' ? LIGHT_GREEN : v.payment_status === 'unpaid' ? LIGHT_RED : YELLOW;
 
       cell(ws1, r, 1, v.voucher_number, bg, true);
-      cell(ws1, r, 2, v.is_important ? '★ ВАЖНО' : '', v.is_important ? YELLOW : bg);
-      const sc = ws1.getCell(r, 3);
+      const sc = ws1.getCell(r, 2);
       sc.value = STATUS_LABELS[v.payment_status] || v.payment_status;
       sc.font = { name: 'Arial', size: 10, bold: true };
       sc.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: statusBg } };
       sc.alignment = { horizontal: 'center' };
       sc.border = { top: { style: 'hair' }, bottom: { style: 'hair' }, left: { style: 'hair' }, right: { style: 'hair' } };
 
-      cell(ws1, r, 4, v.company_name, bg);
-      cell(ws1, r, 5, v.tour_name, bg);
-      cell(ws1, r, 6, v.manager_name, bg);
-      cell(ws1, r, 7, v.client_name, bg);
-      cell(ws1, r, 8, v.client_phone, bg);
-      cell(ws1, r, 9, [v.hotel_name, v.room_number].filter(Boolean).join(' / ') || '—', bg);
+      cell(ws1, r, 3, v.company_name, bg);
+      cell(ws1, r, 4, v.tour_name, bg);
+      cell(ws1, r, 5, v.manager_name, bg);
 
-      cell(ws1, r, 10, v.tour_time || '—', bg);
-      const c11 = ws1.getCell(r, 11); c11.value = Number(v.adults); c11.font = { name: 'Arial', size: 10 }; c11.alignment = { horizontal: 'center' }; if (bg) c11.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bg } };
-      const c12 = ws1.getCell(r, 12); c12.value = Number(v.children); c12.font = { name: 'Arial', size: 10 }; c12.alignment = { horizontal: 'center' }; if (bg) c12.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bg } };
-      const c13 = ws1.getCell(r, 13); c13.value = Number(v.infants); c13.font = { name: 'Arial', size: 10 }; c13.alignment = { horizontal: 'center' }; if (bg) c13.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bg } };
+      const c6 = ws1.getCell(r, 6); c6.value = Number(v.adults); c6.font = { name: 'Arial', size: 10 }; c6.alignment = { horizontal: 'center' }; if (bg) c6.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bg } };
+      const c7 = ws1.getCell(r, 7); c7.value = Number(v.children); c7.font = { name: 'Arial', size: 10 }; c7.alignment = { horizontal: 'center' }; if (bg) c7.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bg } };
+      const c8 = ws1.getCell(r, 8); c8.value = Number(v.infants); c8.font = { name: 'Arial', size: 10 }; c8.alignment = { horizontal: 'center' }; if (bg) c8.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bg } };
 
-      money(ws1, r, 14, v.total_sale, bg);
-      money(ws1, r, 15, v.total_net, bg);
-      money(ws1, r, 16, v.paid_to_agency, bg);
-      money(ws1, r, 17, v.cash_on_tour, bg);
+      money(ws1, r, 9, v.total_sale, bg);
+      money(ws1, r, 10, v.total_net, bg);
+      money(ws1, r, 11, v.paid_to_agency, bg);
+      money(ws1, r, 12, v.cash_on_tour, bg);
 
-      cell(ws1, r, 18, v.agent_name ? `${v.agent_name} (${v.agent_commission_percentage}%)` : '—', bg);
-      cell(ws1, r, 19, [v.remarks, v.cancellation_notes].filter(Boolean).join(' | ') || '', bg);
+      cell(ws1, r, 13, v.agent_name ? `${v.agent_name} (${v.agent_commission_percentage}%)` : '—', bg);
+
+      const profit = Number(v.total_sale || 0) - Number(v.total_net || 0);
+      const agentPct = v.agent_name ? Number(v.agent_commission_percentage || 0) / 100 : 0;
+      const profitAfterAgent = profit - profit * agentPct;
+      const managerPct = Number(v.manager_commission_percentage || 0) / 100;
+      const managerPay = profitAfterAgent * managerPct;
+
+      money(ws1, r, 14, profit, bg);
+      money(ws1, r, 15, profitAfterAgent, bg);
+      money(ws1, r, 16, managerPay, bg);
+      cell(ws1, r, 17, [v.remarks, v.cancellation_notes].filter(Boolean).join(' | ') || '', bg);
     });
 
     // Totals row
     const tr = 5 + vouchers.length;
-    ws1.mergeCells(tr, 1, tr, 13);
+    ws1.mergeCells(tr, 1, tr, 8);
     const totalCell = ws1.getCell(tr, 1);
     totalCell.value = `ИТОГО: ${vouchers.length} ваучеров`;
     totalCell.font = { name: 'Arial', bold: true, size: 10 };
@@ -229,7 +234,7 @@ export const exportDailyAccounting = async (req: AuthRequest, res: Response) => 
     if (vouchers.length > 0) {
       const firstDataRow = 5;
       const lastDataRow = 4 + vouchers.length;
-      [[14, 'total_sale'], [15, 'total_net'], [16, 'paid_to_agency'], [17, 'cash_on_tour']].forEach(([col, _]) => {
+      [[9, 'total_sale'], [10, 'total_net'], [11, 'paid_to_agency'], [12, 'cash_on_tour'], [14, 'profit'], [15, 'profit_agent'], [16, 'manager_pay']].forEach(([col, _]) => {
         const c = ws1.getCell(tr, col as number);
         c.value = { formula: `SUM(${ws1.getColumn(col as number).letter}${firstDataRow}:${ws1.getColumn(col as number).letter}${lastDataRow})` };
         c.numFmt = '#,##0.00 "฿"';
@@ -242,7 +247,7 @@ export const exportDailyAccounting = async (req: AuthRequest, res: Response) => 
     ws1.getRow(tr).height = 22;
 
     // Column widths
-    [12, 10, 12, 20, 28, 18, 20, 16, 22, 8, 6, 6, 6, 14, 14, 14, 14, 22, 30].forEach((w, i) => {
+    [12, 10, 20, 28, 18, 6, 6, 6, 14, 14, 14, 14, 22, 14, 14, 14, 30].forEach((w, i) => {
       ws1.getColumn(i + 1).width = w;
     });
 
@@ -393,6 +398,213 @@ export const exportDailyAccounting = async (req: AuthRequest, res: Response) => 
     res.end();
   } catch (error) {
     console.error('Export error:', error);
+    res.status(500).json({ error: 'Export failed' });
+  }
+};
+
+// Manager report by tour date (Excel)
+export const exportManagerReport = async (req: AuthRequest, res: Response) => {
+  try {
+    const { dateFrom: dfParam, dateTo: dtParam, managerId } = req.query;
+    const user = req.user!;
+    const dateFrom = dfParam ? String(dfParam) : null;
+    const dateTo = dtParam ? String(dtParam) : dateFrom;
+
+    const params: any[] = [dateFrom, dateTo || dateFrom];
+    let managerFilter = '';
+    const userRoles2 = user.roles || [user.role];
+    if (userRoles2.includes('manager') && !userRoles2.includes('admin')) {
+      managerFilter = ` AND v.manager_id = $3`;
+      params.push(user.id);
+    } else if (managerId) {
+      managerFilter = ` AND v.manager_id = $3`;
+      params.push(managerId);
+    }
+
+    const { rows: vouchers } = await pool.query(
+      `SELECT
+        v.voucher_number, v.tour_date, v.tour_time, v.adults, v.children, v.infants,
+        v.total_sale, v.total_net, v.paid_to_agency, v.cash_on_tour,
+        v.payment_status, v.agent_commission_percentage, v.remarks,
+        c.name as client_name, c.phone as client_phone,
+        co.name as company_name, t.name as tour_name,
+        u.full_name as manager_name, u.commission_percentage as manager_commission_percentage,
+        a.name as agent_name
+      FROM vouchers v
+      LEFT JOIN clients c ON v.client_id = c.id
+      LEFT JOIN companies co ON v.company_id = co.id
+      LEFT JOIN tours t ON v.tour_id = t.id
+      LEFT JOIN users u ON v.manager_id = u.id
+      LEFT JOIN agents a ON v.agent_id = a.id
+      WHERE v.tour_date::date >= $1::date AND v.tour_date::date <= $2::date
+        AND v.is_deleted = false ${managerFilter}
+      ORDER BY v.tour_date, co.name`,
+      params
+    );
+
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Отчёт менеджера');
+    ws.views = [{ state: 'frozen', ySplit: 2 }];
+
+    const dateFormatted = dateFrom === dateTo ? dateFrom : `${dateFrom} — ${dateTo}`;
+    ws.mergeCells('A1:N1');
+    const title = ws.getCell('A1');
+    title.value = `ОТЧЁТ МЕНЕДЖЕРА — ДАТА ВЫЕЗДА: ${dateFormatted}`;
+    title.font = { name: 'Arial', bold: true, size: 13, color: { argb: BLUE_HEADER } };
+    title.alignment = { horizontal: 'center', vertical: 'middle' };
+    ws.getRow(1).height = 28;
+
+    const headers = ['Ваучер №', 'Дата выезда', 'Время', 'Компания', 'Тур', 'Менеджер',
+      'Взр.', 'Дет.', 'Мл.', 'Sale (฿)', 'Профит (฿)', 'Профит-Агент (฿)', 'Зарплата (฿)', 'Статус'];
+    headers.forEach((h, i) => hdr(ws, 2, i + 1, h));
+    ws.getRow(2).height = 32;
+
+    const STATUS_LABELS: Record<string, string> = { paid: 'Оплачен', partial: 'Частично', unpaid: 'Не оплачен' };
+    const fmt = (d: any) => d ? new Date(d).toLocaleDateString('ru-RU') : '—';
+
+    vouchers.forEach((v, i) => {
+      const r = 3 + i;
+      const bg = i % 2 === 0 ? WHITE : LIGHT_BLUE;
+      const profit = Number(v.total_sale || 0) - Number(v.total_net || 0);
+      const agentPct = v.agent_name ? Number(v.agent_commission_percentage || 0) / 100 : 0;
+      const profitAfterAgent = profit - profit * agentPct;
+      const managerPct = Number(v.manager_commission_percentage || 0) / 100;
+      const managerPay = profitAfterAgent * managerPct;
+
+      cell(ws, r, 1, v.voucher_number, bg, true);
+      cell(ws, r, 2, fmt(v.tour_date), bg);
+      cell(ws, r, 3, v.tour_time || '—', bg);
+      cell(ws, r, 4, v.company_name, bg);
+      cell(ws, r, 5, v.tour_name, bg);
+      cell(ws, r, 6, v.manager_name, bg);
+      ws.getCell(r, 7).value = Number(v.adults); ws.getCell(r, 7).alignment = { horizontal: 'center' };
+      ws.getCell(r, 8).value = Number(v.children); ws.getCell(r, 8).alignment = { horizontal: 'center' };
+      ws.getCell(r, 9).value = Number(v.infants); ws.getCell(r, 9).alignment = { horizontal: 'center' };
+      money(ws, r, 10, v.total_sale, bg);
+      money(ws, r, 11, profit, bg);
+      money(ws, r, 12, profitAfterAgent, bg);
+      money(ws, r, 13, managerPay, bg);
+      cell(ws, r, 14, STATUS_LABELS[v.payment_status] || v.payment_status, bg);
+    });
+
+    [12, 12, 8, 20, 28, 18, 5, 5, 5, 14, 14, 14, 14, 12].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+
+    const filename = dateFrom === dateTo ? `manager_${dateFrom}.xlsx` : `manager_${dateFrom}_${dateTo}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    await wb.xlsx.write(res);
+    res.end();
+  } catch (error) {
+    console.error('Manager export error:', error);
+    res.status(500).json({ error: 'Export failed' });
+  }
+};
+
+// HTML report by tour date
+export const exportHtmlReport = async (req: AuthRequest, res: Response) => {
+  try {
+    const { dateFrom: dfParam, dateTo: dtParam, managerId } = req.query;
+    const user = req.user!;
+    const dateFrom = dfParam ? String(dfParam) : null;
+    const dateTo = dtParam ? String(dtParam) : dateFrom;
+
+    const params: any[] = [dateFrom, dateTo || dateFrom];
+    let managerFilter = '';
+    const userRoles3 = user.roles || [user.role];
+    if (userRoles3.includes('manager') && !userRoles3.includes('admin')) {
+      managerFilter = ` AND v.manager_id = $3`;
+      params.push(user.id);
+    } else if (managerId) {
+      managerFilter = ` AND v.manager_id = $3`;
+      params.push(managerId);
+    }
+
+    const { rows: vouchers } = await pool.query(
+      `SELECT
+        v.voucher_number, v.tour_date, v.adults, v.children, v.infants,
+        v.total_sale, v.total_net, v.paid_to_agency, v.payment_status,
+        v.agent_commission_percentage,
+        co.name as company_name, t.name as tour_name,
+        u.full_name as manager_name, u.commission_percentage as manager_commission_percentage,
+        a.name as agent_name
+      FROM vouchers v
+      LEFT JOIN companies co ON v.company_id = co.id
+      LEFT JOIN tours t ON v.tour_id = t.id
+      LEFT JOIN users u ON v.manager_id = u.id
+      LEFT JOIN agents a ON v.agent_id = a.id
+      WHERE v.tour_date::date >= $1::date AND v.tour_date::date <= $2::date
+        AND v.is_deleted = false ${managerFilter}
+      ORDER BY v.tour_date, co.name`,
+      params
+    );
+
+    const fmt = (d: any) => d ? new Date(d).toLocaleDateString('ru-RU') : '—';
+    const money2 = (n: any) => n != null ? Number(n).toLocaleString('ru-RU', { minimumFractionDigits: 0 }) + ' ฿' : '—';
+    const STATUS: Record<string, string> = { paid: 'Оплачен', partial: 'Частично', unpaid: 'Не оплачен' };
+    const STATUS_COLOR: Record<string, string> = { paid: '#4caf50', partial: '#ff9800', unpaid: '#f44336' };
+
+    let totalSale = 0, totalProfit = 0, totalManagerPay = 0;
+    const rows = vouchers.map((v, i) => {
+      const profit = Number(v.total_sale || 0) - Number(v.total_net || 0);
+      const agentPct = v.agent_name ? Number(v.agent_commission_percentage || 0) / 100 : 0;
+      const profitAfterAgent = profit - profit * agentPct;
+      const managerPay = profitAfterAgent * (Number(v.manager_commission_percentage || 0) / 100);
+      totalSale += Number(v.total_sale || 0);
+      totalProfit += profit;
+      totalManagerPay += managerPay;
+      const bg = i % 2 === 0 ? '#fff' : '#f0f4f8';
+      const sc = STATUS_COLOR[v.payment_status] || '#999';
+      return `<tr style="background:${bg}">
+        <td>${v.voucher_number}</td>
+        <td>${fmt(v.tour_date)}</td>
+        <td>${v.company_name || '—'}</td>
+        <td>${v.tour_name || '—'}</td>
+        <td>${v.manager_name || '—'}</td>
+        <td style="text-align:center">${Number(v.adults)+Number(v.children)}</td>
+        <td style="text-align:right;font-weight:600">${money2(v.total_sale)}</td>
+        <td style="text-align:right;color:#1b5e20;font-weight:600">${money2(profit)}</td>
+        <td style="text-align:right;color:#0d47a1;font-weight:600">${money2(managerPay)}</td>
+        <td><span style="background:${sc};color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">${STATUS[v.payment_status]||v.payment_status}</span></td>
+      </tr>`;
+    }).join('');
+
+    const dateFormatted = dateFrom === dateTo ? dateFrom : `${dateFrom} — ${dateTo}`;
+    const html = `<!DOCTYPE html><html lang="ru"><head><meta charset="UTF-8">
+<title>Отчёт по выезду ${dateFormatted}</title>
+<style>
+  body{font-family:Arial,sans-serif;font-size:13px;margin:20px;color:#222}
+  h2{color:#1e3a5f;margin-bottom:4px}
+  .cards{display:flex;gap:16px;margin:16px 0;flex-wrap:wrap}
+  .card{background:#f0f4f8;border-radius:8px;padding:12px 20px;min-width:140px}
+  .card .label{font-size:11px;color:#666;margin-bottom:4px}
+  .card .val{font-size:20px;font-weight:700;color:#1e3a5f}
+  table{width:100%;border-collapse:collapse;margin-top:16px}
+  th{background:#1e3a5f;color:#fff;padding:8px;text-align:left;font-size:12px}
+  td{padding:7px 8px;border-bottom:1px solid #e0e0e0;font-size:12px}
+  @media print{.noprint{display:none}}
+</style>
+</head><body>
+<button class="noprint" onclick="window.print()" style="margin-bottom:16px;padding:8px 20px;background:#1e3a5f;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px">🖨 Печать / PDF</button>
+<h2>Отчёт по дате выезда: ${dateFormatted}</h2>
+<p style="color:#666;font-size:12px">Сформировано: ${new Date().toLocaleString('ru-RU')} | Ваучеров: ${vouchers.length}</p>
+<div class="cards">
+  <div class="card"><div class="label">Продажи</div><div class="val">${money2(totalSale)}</div></div>
+  <div class="card"><div class="label">Профит</div><div class="val" style="color:#1b5e20">${money2(totalProfit)}</div></div>
+  <div class="card"><div class="label">Зарплата</div><div class="val" style="color:#0d47a1">${money2(totalManagerPay)}</div></div>
+</div>
+<table>
+<thead><tr>
+  <th>Ваучер</th><th>Дата выезда</th><th>Компания</th><th>Тур</th><th>Менеджер</th>
+  <th>Пакс</th><th>Sale</th><th>Профит</th><th>Зарплата</th><th>Статус</th>
+</tr></thead>
+<tbody>${rows}</tbody>
+</table>
+</body></html>`;
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (error) {
+    console.error('HTML report error:', error);
     res.status(500).json({ error: 'Export failed' });
   }
 };
