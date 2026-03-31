@@ -251,6 +251,14 @@ export const copyVoucher = async (req: AuthRequest, res: Response) => {
     const v = original.rows[0];
     if (user.role === 'manager' && v.manager_id !== user.id) { await client.query('ROLLBACK'); return res.status(403).json({ error: 'Access denied' }); }
     const voucherNumber = await generateVoucherNumber(v.manager_id || user.id);
+
+    // If the original voucher's agent was deleted, don't carry over the FK
+    let safeAgentId = v.agent_id;
+    if (safeAgentId) {
+      const agentCheck = await client.query('SELECT id FROM agents WHERE id=$1', [safeAgentId]);
+      if (agentCheck.rows.length === 0) safeAgentId = null;
+    }
+
     const result = await client.query(
       `INSERT INTO vouchers (
         voucher_number, tour_type, client_id, manager_id, company_id, tour_id,
@@ -267,7 +275,7 @@ export const copyVoucher = async (req: AuthRequest, res: Response) => {
         v.adults, v.children, v.infants,
         v.adult_net, v.child_net, v.infant_net, v.transfer_net, v.other_net,
         v.adult_sale, v.child_sale, v.infant_sale, v.transfer_sale, v.other_sale,
-        v.agent_id, v.agent_commission_percentage, v.remarks, v.is_important, v.cancellation_notes,
+        safeAgentId, safeAgentId ? v.agent_commission_percentage : 0, v.remarks, v.is_important, v.cancellation_notes,
       ]
     );
     await client.query('COMMIT');
@@ -317,10 +325,9 @@ export const getToursByCompany = async (req: AuthRequest, res: Response) => {
     const { companyId } = req.params;
     // Return article per tour+company (take max so DISTINCT works; article should be same across periods)
     const result = await pool.query(
-      `SELECT t.id, t.name, t.tour_type, t.article as tour_article, MAX(tp.article) as price_article
-       FROM tours t JOIN tour_prices tp ON tp.tour_id = t.id
-       WHERE tp.company_id=$1 AND t.is_active=true AND tp.is_active=true
-       GROUP BY t.id, t.name, t.tour_type, t.article
+      `SELECT t.id, t.name, t.tour_type, t.article as tour_article, t.article as price_article, t.company_id
+       FROM tours t
+       WHERE t.company_id=$1 AND t.is_active=true
        ORDER BY t.name`,
       [companyId]
     );

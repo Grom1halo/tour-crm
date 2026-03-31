@@ -1,34 +1,34 @@
 #!/usr/bin/env node
 /**
- * Incremental sync: MySQL (ci19820_voucher2) → PostgreSQL (tour_crm)
+ * ИНКРЕМЕНТАЛЬНАЯ СИНХРОНИЗАЦИЯ: MySQL (Laravel) → PostgreSQL (новый сайт)
  *
- * Automatically detects the latest migrated voucher and syncs only new ones.
+ * Тянет только новые и изменённые ваучеры с момента последней синхронизации.
+ * Клиенты и агенты создаются автоматически если ещё не существуют.
  *
- * Usage:
- *   node sync-from-mysql.js [--dry-run] [--from-date=2025-04-01] [--all]
+ * Зависимости (уже есть от migrate-from-mysql.js):
+ *   npm install mysql2 pg
  *
- * Options:
- *   --dry-run           Show what would be synced, don't write
- *   --from-date=DATE    Sync vouchers created after this date
- *   --all               Re-sync everything (safe, skips duplicates)
+ * Использование:
+ *   node sync-from-mysql.js              — синхронизировать новое
+ *   node sync-from-mysql.js --dry-run    — показать что изменилось, не писать
+ *   node sync-from-mysql.js --full       — принудительно всё пересинхронизировать
+ *   node sync-from-mysql.js --since 2025-01-01  — с конкретной даты
  *
- * Env vars (optional, defaults shown):
- *   MYSQL_HOST     localhost
- *   MYSQL_PORT     3306
- *   MYSQL_USER     root
- *   MYSQL_PASSWORD (empty)
- *   MYSQL_DB       ci19820_voucher2
- *   PG_HOST        localhost
- *   PG_PORT        5432
- *   PG_USER        postgres
- *   PG_PASSWORD    postgres (override below)
- *   PG_DB          tour_crm
+ * Переменные окружения:
+ *   MYSQL_HOST / MYSQL_PORT / MYSQL_USER / MYSQL_PASSWORD / MYSQL_DB
+ *   PG_HOST / PG_PORT / PG_USER / PG_PASSWORD / PG_DB
+ *
+ * Прогресс сохраняется в .sync-state.json
  */
 
 'use strict';
 
 const mysql = require('mysql2/promise');
 const { Pool } = require('pg');
+const fs    = require('fs');
+const path  = require('path');
+
+// ─── CONFIG ──────────────────────────────────────────────────────────────────
 
 const MYSQL_CONFIG = {
   host:     process.env.MYSQL_HOST     || 'localhost',
@@ -43,381 +43,326 @@ const PG_CONFIG = {
   host:     process.env.PG_HOST     || 'localhost',
   port:     parseInt(process.env.PG_PORT || '5432'),
   user:     process.env.PG_USER     || 'postgres',
-  password: process.env.PG_PASSWORD ,
+  password: process.env.PG_PASSWORD || 'postgres',
   database: process.env.PG_DB       || 'tour_crm',
 };
 
-const DRY_RUN   = process.argv.includes('--dry-run');
-const SYNC_ALL  = process.argv.includes('--all');
-const FROM_DATE = (() => {
-  const arg = process.argv.find(a => a.startsWith('--from-date='));
-  return arg ? arg.split('=')[1] : null;
-})();
+const STATE_FILE = path.join(__dirname, '.sync-state.json');
+const DRY_RUN    = process.argv.includes('--dry-run');
+const FULL_SYNC  = process.argv.includes('--full');
+const SINCE_IDX  = process.argv.indexOf('--since');
+const SINCE_DATE = SINCE_IDX !== -1 ? process.argv[SINCE_IDX + 1] : null;
 
-function log(msg)  { console.log(`[INFO]  ${msg}`); }
-function warn(msg) { console.warn(`[WARN]  ${msg}`); }
-function err(msg)  { console.error(`[ERROR] ${msg}`); }
-function f(v)      { const n = parseFloat(v); return isNaN(n) ? 0 : n; }
-function s(v)      { return (v || '').toString().trim(); }
+// ─── HELPERS ─────────────────────────────────────────────────────────────────
+
+const C = {
+  green:  s => `\x1b[32m${s}\x1b[0m`,
+  red:    s => `\x1b[31m${s}\x1b[0m`,
+  yellow: s => `\x1b[33m${s}\x1b[0m`,
+  cyan:   s => `\x1b[36m${s}\x1b[0m`,
+  bold:   s => `\x1b[1m${s}\x1b[0m`,
+  dim:    s => `\x1b[2m${s}\x1b[0m`,
+};
+
+const ts  = () => new Date().toLocaleTimeString('ru-RU');
+const log = msg  => console.log(`${C.dim(ts())}  ${msg}`);
+const ok  = msg  => console.log(`${C.dim(ts())}  ${C.green('OK')} ${msg}`);
+const wrn = msg  => console.log(`${C.dim(ts())}  ${C.yellow('!!')} ${msg}`);
+const bad = msg  => console.log(`${C.dim(ts())}  ${C.red('XX')} ${msg}`);
+const sec = t    => console.log(`\n${C.bold(C.cyan('== ' + t + ' =='))}`);
+
+function loadState() {
+  if (!fs.existsSync(STATE_FILE)) return { lastSync: null, synced: 0 };
+  try { return JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')); }
+  catch (e) { return { lastSync: null, synced: 0 }; }
+}
+function saveState(obj) { fs.writeFileSync(STATE_FILE, JSON.stringify(obj, null, 2)); }
+
+const toFloat  = v => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
+const toStr    = v => (v || '').toString().trim();
 
 function deriveTourType(row) {
   if (row.tur_flot_flag   === 1) return 'tourflot';
   if (row.individual_tour === 1) return 'individual';
   return 'group';
 }
-
 function derivePaymentStatus(row) {
-  if (row.voucher_paid === 1) return 'paid';
-  if (parseFloat(row.price_deposit || 0) > 0) return 'partial';
+  if (row.voucher_paid === 1)            return 'paid';
+  if (toFloat(row.price_deposit) > 0)   return 'partial';
   return 'unpaid';
 }
 
+// ─── MAIN ────────────────────────────────────────────────────────────────────
+
 async function main() {
-  log(`Mode: ${DRY_RUN ? 'DRY RUN' : 'LIVE SYNC'}`);
+  const state = loadState();
 
-  // ── Connect ──────────────────────────────────────────────────────────────────
-  log('Connecting to MySQL…');
-  const my = await mysql.createConnection(MYSQL_CONFIG);
+  let since;
+  if (SINCE_DATE)                      since = new Date(SINCE_DATE);
+  else if (FULL_SYNC || !state.lastSync) since = new Date('2000-01-01');
+  else                                 since = new Date(state.lastSync);
 
-  log('Connecting to PostgreSQL…');
-  const pg = new Pool(PG_CONFIG);
-  await pg.query('SELECT 1');
+  const sinceStr = since.toISOString().replace('T', ' ').substring(0, 19);
 
-  // ── Determine cutoff date ────────────────────────────────────────────────────
-  let cutoffDate;
-  if (SYNC_ALL) {
-    cutoffDate = '2000-01-01';
-    log('Mode: sync ALL vouchers (skips existing by voucher_number)');
-  } else if (FROM_DATE) {
-    cutoffDate = FROM_DATE;
-    log(`Mode: sync from --from-date=${cutoffDate}`);
-  } else {
-    // Auto-detect: find oldest created_at from migrated vouchers that came from old system
-    // Old system voucher numbers are numeric or date-based (not new format like "01500")
-    // We look for the MAX created_at among vouchers that look like old-system numbers
-    const res = await pg.query(`
-      SELECT MAX(created_at)::date AS max_date
-      FROM vouchers
-      WHERE created_at IS NOT NULL
-    `);
-    const maxDate = res.rows[0]?.max_date;
-    if (maxDate) {
-      // Go back 7 days to catch any edge cases
-      const d = new Date(maxDate);
-      d.setDate(d.getDate() - 7);
-      cutoffDate = d.toISOString().split('T')[0];
-      log(`Auto-detected cutoff: ${cutoffDate} (latest PG voucher: ${maxDate}, minus 7 days)`);
-    } else {
-      cutoffDate = '2000-01-01';
-      log('No existing vouchers found — syncing everything');
-    }
+  console.log(C.bold('\n MySQL -> PostgreSQL  Инкрементальная синхронизация'));
+  console.log(C.dim('Режим:   ' + (DRY_RUN ? 'DRY RUN (запись отключена)' : FULL_SYNC ? 'ПОЛНАЯ' : 'ИНКРЕМЕНТАЛЬНАЯ')));
+  console.log(C.dim('С даты:  ' + sinceStr));
+  if (state.lastSync) console.log(C.dim('Последний запуск: ' + state.lastSync + '  (синхронизировано: ' + (state.synced || 0) + ')'));
+  console.log();
+
+  sec('Подключение');
+  let my, pg;
+  try {
+    my = await mysql.createConnection(MYSQL_CONFIG);
+    ok('MySQL: ' + MYSQL_CONFIG.host + '/' + MYSQL_CONFIG.database);
+  } catch (e) { bad('MySQL: ' + e.message); process.exit(1); }
+
+  if (!DRY_RUN) {
+    try {
+      pg = new Pool(PG_CONFIG);
+      await pg.query('SELECT 1');
+      ok('PostgreSQL: ' + PG_CONFIG.host + '/' + PG_CONFIG.database);
+    } catch (e) { bad('PostgreSQL: ' + e.message); process.exit(1); }
   }
 
-  // ── Read MySQL data ───────────────────────────────────────────────────────────
-  log(`Reading MySQL vouchers created after ${cutoffDate}…`);
-
-  const [mysqlUsers]    = await my.execute('SELECT * FROM users');
-  const [mysqlCompanies] = await my.execute('SELECT * FROM companies');
-  const [mysqlTours]    = await my.execute('SELECT * FROM company_tours');
-  const [mysqlVouchers] = await my.execute(
-    `SELECT * FROM vouchers WHERE created_at >= ? ORDER BY id`,
-    [cutoffDate]
+  sec('Чтение из MySQL');
+  const [changed] = await my.execute(
+    'SELECT * FROM vouchers WHERE updated_at >= ? ORDER BY updated_at ASC',
+    [sinceStr]
   );
+  log('Изменённых ваучеров: ' + C.bold(String(changed.length)));
 
+  if (changed.length === 0) {
+    ok('Нет изменений. База актуальна.');
+    await my.end();
+    if (pg) await pg.end();
+    return;
+  }
+
+  const uniq = (arr) => [...new Set(arr.filter(Boolean))];
+  const companyIds = uniq(changed.map(v => v.company_id));
+  const tourIds    = uniq(changed.map(v => v.company_tour_id));
+  const mgrIds     = uniq(changed.map(v => v.voucher_created_user_id));
+  const inList     = ids => ids.map(() => '?').join(',');
+
+  const [mysqlCompanies] = companyIds.length
+    ? await my.execute('SELECT * FROM companies WHERE id IN (' + inList(companyIds) + ')', companyIds) : [[]];
+  const [mysqlTours] = tourIds.length
+    ? await my.execute('SELECT * FROM company_tours WHERE id IN (' + inList(tourIds) + ')', tourIds) : [[]];
+  const [mysqlUsers] = mgrIds.length
+    ? await my.execute('SELECT * FROM users WHERE id IN (' + inList(mgrIds) + ')', mgrIds) : [[]];
+
+  log('Справочники: ' + mysqlCompanies.length + ' компаний, ' + mysqlTours.length + ' туров, ' + mysqlUsers.length + ' менеджеров');
   await my.end();
 
-  log(`  Found ${mysqlVouchers.length} voucher(s) to sync (from ${cutoffDate})`);
-  log(`  Users: ${mysqlUsers.length}, Companies: ${mysqlCompanies.length}, Tours: ${mysqlTours.length}`);
-
-  if (mysqlVouchers.length === 0) {
-    log('Nothing to sync. Database is up to date!');
-    await pg.end();
-    return;
-  }
-
   if (DRY_RUN) {
-    log('\n=== DRY RUN — first 10 vouchers that would be synced ===');
-    for (const v of mysqlVouchers.slice(0, 10)) {
-      log(`  #${String(v.voucher_number).padEnd(12)} created=${v.created_at?.toISOString().split('T')[0]}  client="${v.client_name}"  type=${deriveTourType(v)}`);
+    sec('Предпросмотр (dry-run, первые 30)');
+    for (const v of changed.slice(0, 30)) {
+      const isNew  = new Date(v.created_at) >= since;
+      const label  = isNew ? C.green('NEW') : C.yellow('UPD');
+      console.log('  [' + label + '] #' + v.voucher_number + '  "' + toStr(v.client_name) + '"  updated=' + v.updated_at);
     }
-    if (mysqlVouchers.length > 10) log(`  ... and ${mysqlVouchers.length - 10} more`);
-    log('\nRe-run without --dry-run to actually sync.');
-    await pg.end();
+    if (changed.length > 30) log('  ...ещё ' + (changed.length - 30));
     return;
   }
 
-  // ── Build lookup maps from MySQL data ────────────────────────────────────────
-  const clientMap = new Map();
-  const agentMap  = new Map();
-  for (const v of mysqlVouchers) {
-    const phone = s(v.client_phone);
-    const name  = s(v.client_name);
-    const mgr   = v.voucher_created_user_id;
-    if (phone || name) {
-      const key = `${phone}|${mgr}`;
-      if (!clientMap.has(key)) clientMap.set(key, { name, phone, manager_id: mgr });
-    }
-    const agName = s(v.agent_name);
-    if (agName) {
-      const key = agName.toLowerCase();
-      if (!agentMap.has(key)) agentMap.set(key, { name: agName });
-    }
-  }
+  sec('Запись в PostgreSQL');
+  const pgClient = await pg.connect();
+  const syncTime = new Date().toISOString();
+  let inserted = 0, updated = 0, errors = 0;
 
-  // ── Upsert reference data, build ID maps ─────────────────────────────────────
-  const client = await pg.connect();
   try {
-    await client.query('BEGIN');
+    await pgClient.query('BEGIN');
 
-    // Users
+    // Upsert менеджеры
     const userIdMap = new Map();
     for (const u of mysqlUsers) {
-      const username = s(u.email).split('@')[0] || `user_${u.id}`;
-      const res = await client.query(
-        `INSERT INTO users (username, password_hash, full_name, role, commission_percentage, is_active)
-         VALUES ($1, $2, $3, 'manager', $4, true)
-         ON CONFLICT (username) DO UPDATE SET full_name = EXCLUDED.full_name
-         RETURNING id`,
-        [username, u.password || '$2b$10$placeholder', s(u.name) || username, f(u.manager_percent)]
+      const uname = toStr(u.email).split('@')[0] || ('user_' + u.id);
+      const res = await pgClient.query(
+        'INSERT INTO users (username,password_hash,full_name,role,commission_percentage,is_active) VALUES ($1,$2,$3,$4,$5,true) ON CONFLICT (username) DO UPDATE SET full_name=EXCLUDED.full_name, commission_percentage=EXCLUDED.commission_percentage RETURNING id',
+        [uname, u.password || '$2b$10$placeholder', toStr(u.name) || uname, 'manager', toFloat(u.manager_percent)]
       );
       userIdMap.set(u.id, res.rows[0].id);
     }
 
-    // Companies
+    // Upsert компании
     const companyIdMap = new Map();
     for (const c of mysqlCompanies) {
-      const res = await client.query(
-        `INSERT INTO companies (name, is_active)
-         VALUES ($1, true)
-         ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
-         RETURNING id`,
-        [s(c.name)]
+      const res = await pgClient.query(
+        'INSERT INTO companies (name,is_active) VALUES ($1,true) ON CONFLICT (name) DO UPDATE SET name=EXCLUDED.name RETURNING id',
+        [toStr(c.name)]
       );
       companyIdMap.set(c.id, res.rows[0].id);
     }
 
-    // Tours
+    // Upsert туры
     const tourIdMap = new Map();
     for (const t of mysqlTours) {
-      const tourName = s(t.tour_name);
-      if (!tourName) continue;
-      const res = await client.query(
-        `INSERT INTO tours (name, tour_type, is_active)
-         VALUES ($1, 'group', true)
-         ON CONFLICT DO NOTHING RETURNING id`,
-        [tourName]
+      const tname = toStr(t.tour_name);
+      if (!tname) continue;
+      let res = await pgClient.query(
+        'INSERT INTO tours (name,tour_type,is_active) VALUES ($1,$2,true) ON CONFLICT DO NOTHING RETURNING id',
+        [tname, 'group']
       );
-      let newTourId = res.rows[0]?.id;
-      if (!newTourId) {
-        const ex = await client.query('SELECT id FROM tours WHERE name=$1', [tourName]);
-        newTourId = ex.rows[0]?.id;
+      if (!res.rows.length) {
+        res = await pgClient.query('SELECT id FROM tours WHERE name=$1', [tname]);
       }
-      if (newTourId) tourIdMap.set(t.id, newTourId);
-    }
-
-    // Agents
-    const agentNewIdMap = new Map();
-    for (const [key, a] of agentMap) {
-      const res = await client.query(
-        `INSERT INTO agents (name, commission_percentage, is_active)
-         VALUES ($1, 0, true)
-         ON CONFLICT DO NOTHING RETURNING id`,
-        [a.name]
-      );
-      let newId = res.rows[0]?.id;
-      if (!newId) {
-        const ex = await client.query('SELECT id FROM agents WHERE LOWER(name)=LOWER($1)', [a.name]);
-        newId = ex.rows[0]?.id;
+      const tid = res.rows[0] && res.rows[0].id;
+      if (!tid) continue;
+      tourIdMap.set(t.id, tid);
+      const cid = companyIdMap.get(t.company_id);
+      if (cid) {
+        await pgClient.query(
+          'INSERT INTO tour_prices (tour_id,company_id,valid_from,valid_to,adult_net,child_net,infant_net,transfer_net,other_net,adult_sale,child_sale,infant_sale,transfer_sale,other_sale) VALUES ($1,$2,$3,$4,$5,$6,0,0,0,$5,$6,0,0,0) ON CONFLICT DO NOTHING',
+          [tid, cid, '2020-01-01', '2099-12-31', toFloat(t.price_nett_adult), toFloat(t.price_nett_child)]
+        );
       }
-      if (newId) agentNewIdMap.set(key, newId);
     }
 
-    // Clients
-    const clientNewIdMap = new Map();
-    for (const [key, c] of clientMap) {
-      const newManagerId = userIdMap.get(c.manager_id);
-      if (!newManagerId) continue;
-      const res = await client.query(
-        `INSERT INTO clients (name, phone, manager_id)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (phone, manager_id) DO UPDATE SET name = EXCLUDED.name
-         RETURNING id`,
-        [c.name || 'Unknown', c.phone || '', newManagerId]
-      );
-      clientNewIdMap.set(key, res.rows[0].id);
-    }
+    await pgClient.query('ALTER TABLE vouchers DISABLE TRIGGER trigger_update_voucher_totals');
 
-    // ── Vouchers ─────────────────────────────────────────────────────────────────
-    log('Syncing vouchers…');
-    let voucherNew = 0, voucherSkip = 0, voucherErr = 0;
-
-    await client.query('ALTER TABLE vouchers DISABLE TRIGGER trigger_update_voucher_totals');
-
-    for (const v of mysqlVouchers) {
+    for (const v of changed) {
       try {
-        const tourType      = deriveTourType(v);
-        const paymentStatus = derivePaymentStatus(v);
+        // Менеджер
+        let mgr = userIdMap.get(v.voucher_created_user_id);
+        if (!mgr) {
+          const un = 'user_' + v.voucher_created_user_id;
+          const r = await pgClient.query(
+            'INSERT INTO users (username,password_hash,full_name,role,commission_percentage,is_active) VALUES ($1,$2,$3,$4,0,true) ON CONFLICT (username) DO UPDATE SET username=EXCLUDED.username RETURNING id',
+            [un, '$2b$10$placeholder', 'Manager ' + v.voucher_created_user_id, 'manager']
+          );
+          mgr = r.rows[0].id;
+        }
 
-        const newManagerId = userIdMap.get(v.voucher_created_user_id);
-        const newCompanyId = companyIdMap.get(v.company_id) || null;
-        const newTourId    = tourIdMap.get(v.company_tour_id) || null;
-        const agentKey     = s(v.agent_name).toLowerCase();
-        const newAgentId   = agentKey ? (agentNewIdMap.get(agentKey) || null) : null;
-        const clientKey    = `${s(v.client_phone)}|${v.voucher_created_user_id}`;
-        const newClientId  = clientNewIdMap.get(clientKey) || null;
+        // Клиент
+        const phone = toStr(v.client_phone);
+        const cname = toStr(v.client_name) || 'Unknown';
+        let clientId = null;
+        if (phone || cname !== 'Unknown') {
+          const r = await pgClient.query(
+            'INSERT INTO clients (name,phone,manager_id) VALUES ($1,$2,$3) ON CONFLICT (phone,manager_id) DO UPDATE SET name=EXCLUDED.name RETURNING id',
+            [cname, phone || '', mgr]
+          );
+          clientId = r.rows[0].id;
+        }
 
-        const isIndividual = v.individual_tour === 1;
-        const adultSale    = f(isIndividual ? v.price_individual : v.price_adult);
-        const adultNet     = f(isIndividual ? v.price_nett_individual : v.price_nett_adult);
-        const childSale    = f(v.price_child);
-        const childNet     = f(v.price_nett_child);
-        const transferSale = f(v.price_transfer);
-        const transferNet  = f(v.price_nett_transfer);
-        const otherSale    = f(v.price_other);
-        const otherNet     = f(v.price_nett_other);
+        // Агент
+        const aname = toStr(v.agent_name);
+        let agentId = null;
+        if (aname) {
+          let r = await pgClient.query(
+            'INSERT INTO agents (name,commission_percentage,is_active) VALUES ($1,0,true) ON CONFLICT DO NOTHING RETURNING id',
+            [aname]
+          );
+          if (!r.rows.length) {
+            r = await pgClient.query('SELECT id FROM agents WHERE LOWER(name)=LOWER($1)', [aname]);
+          }
+          agentId = r.rows[0] ? r.rows[0].id : null;
+        }
 
+        const companyId = companyIdMap.get(v.company_id) || null;
+        const tourId    = tourIdMap.get(v.company_tour_id) || null;
+
+        const isInd    = v.individual_tour === 1;
+        const aSale    = toFloat(isInd ? v.price_individual     : v.price_adult);
+        const aNet     = toFloat(isInd ? v.price_nett_individual : v.price_nett_adult);
+        const cSale    = toFloat(v.price_child);
+        const cNet     = toFloat(v.price_nett_child);
+        const tSale    = toFloat(v.price_transfer);
+        const tNet     = toFloat(v.price_nett_transfer);
+        const oSale    = toFloat(v.price_other);
+        const oNet     = toFloat(v.price_nett_other);
         const adults   = parseInt(v.client_count_adults || 0);
         const children = parseInt(v.client_count_child  || 0);
-        const infants  = parseInt(v.client_count_infant || 0);
+        const totNet   = adults*aNet  + children*cNet  + (adults+children)*tNet  + oNet;
+        const totSale  = adults*aSale + children*cSale + (adults+children)*tSale + oSale;
+        const paid     = toFloat(v.price_deposit);
+        const agtPct   = totSale > 0 ? parseFloat((toFloat(v.agent_commission)/totSale*100).toFixed(2)) : 0;
 
-        const totalNet  = adults * adultNet + children * childNet
-                        + (adults + children) * transferNet + otherNet;
-        const totalSale = adults * adultSale + children * childSale
-                        + (adults + children) * transferSale + otherSale;
-
-        const paidToAgency = f(v.price_deposit);
-        const cashOnTour   = totalSale - paidToAgency;
-        const agentCommAmt = f(v.agent_commission);
-        const agentCommPct = totalSale > 0 ? parseFloat((agentCommAmt / totalSale * 100).toFixed(2)) : 0;
-
-        let remarks = s(v.voucher_remarks);
-        if (v.voucher_important === 1) remarks = `[ВАЖНО] ${remarks}`.trim();
-        if (s(v.voucher_cancellations)) remarks += ` | Отмена: ${s(v.voucher_cancellations)}`;
+        let remarks = toStr(v.voucher_remarks);
+        if (v.voucher_important === 1) remarks = '[ВАЖНО] ' + remarks;
+        if (toStr(v.voucher_cancellations)) remarks += ' | Отмена: ' + toStr(v.voucher_cancellations);
         remarks = remarks.trim() || null;
 
         let tourDate = null, tourTime = null;
         if (v.client_datetime_trip) {
           const dt = new Date(v.client_datetime_trip);
-          if (!isNaN(dt)) {
+          if (!isNaN(dt.getTime())) {
             tourDate = dt.toISOString().split('T')[0];
             tourTime = dt.toTimeString().split(' ')[0];
           }
         }
-        if (!tourDate) {
-          tourDate = v.created_at
-            ? new Date(v.created_at).toISOString().split('T')[0]
-            : '2020-01-01';
-        }
+        if (!tourDate) tourDate = v.created_at ? new Date(v.created_at).toISOString().split('T')[0] : '2020-01-01';
 
-        const res = await client.query(
-          `INSERT INTO vouchers (
-             voucher_number, tour_type,
-             client_id, manager_id, company_id, tour_id, agent_id,
-             tour_date, tour_time,
-             hotel_name, room_number,
-             adults, children, infants,
-             adult_net, child_net, infant_net, transfer_net, other_net,
-             adult_sale, child_sale, infant_sale, transfer_sale, other_sale,
-             total_net, total_sale,
-             paid_to_agency, cash_on_tour,
-             payment_status, agent_commission_percentage,
-             remarks, is_deleted, deleted_at,
-             created_at, updated_at
-           ) VALUES (
-             $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,
-             $12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,
-             $25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35
-           )
-           ON CONFLICT (voucher_number) DO UPDATE SET
-             updated_at       = EXCLUDED.updated_at,
-             payment_status   = EXCLUDED.payment_status,
-             paid_to_agency   = EXCLUDED.paid_to_agency,
-             cash_on_tour     = EXCLUDED.cash_on_tour,
-             remarks          = EXCLUDED.remarks,
-             is_deleted       = EXCLUDED.is_deleted,
-             deleted_at       = EXCLUDED.deleted_at
-           RETURNING (xmax = 0) AS inserted`,
+        const res = await pgClient.query(
+          'INSERT INTO vouchers (voucher_number,tour_type,client_id,manager_id,company_id,tour_id,agent_id,tour_date,tour_time,hotel_name,room_number,adults,children,infants,adult_net,child_net,infant_net,transfer_net,other_net,adult_sale,child_sale,infant_sale,transfer_sale,other_sale,total_net,total_sale,paid_to_agency,cash_on_tour,payment_status,agent_commission_percentage,remarks,is_important,is_deleted,deleted_at,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,0,$14,$15,0,$16,$17,$18,$19,0,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33) ON CONFLICT (voucher_number) DO UPDATE SET tour_type=EXCLUDED.tour_type,client_id=EXCLUDED.client_id,company_id=EXCLUDED.company_id,tour_id=EXCLUDED.tour_id,agent_id=EXCLUDED.agent_id,tour_date=EXCLUDED.tour_date,tour_time=EXCLUDED.tour_time,hotel_name=EXCLUDED.hotel_name,room_number=EXCLUDED.room_number,adults=EXCLUDED.adults,children=EXCLUDED.children,adult_net=EXCLUDED.adult_net,child_net=EXCLUDED.child_net,transfer_net=EXCLUDED.transfer_net,other_net=EXCLUDED.other_net,adult_sale=EXCLUDED.adult_sale,child_sale=EXCLUDED.child_sale,transfer_sale=EXCLUDED.transfer_sale,other_sale=EXCLUDED.other_sale,total_net=EXCLUDED.total_net,total_sale=EXCLUDED.total_sale,paid_to_agency=EXCLUDED.paid_to_agency,cash_on_tour=EXCLUDED.cash_on_tour,payment_status=EXCLUDED.payment_status,agent_commission_percentage=EXCLUDED.agent_commission_percentage,remarks=EXCLUDED.remarks,is_important=EXCLUDED.is_important,is_deleted=EXCLUDED.is_deleted,deleted_at=EXCLUDED.deleted_at,updated_at=EXCLUDED.updated_at RETURNING (xmax=0) AS is_insert, id',
           [
-            s(v.voucher_number), tourType,
-            newClientId, newManagerId, newCompanyId, newTourId, newAgentId,
-            tourDate, tourTime,
-            s(v.hotel_name) || null, s(v.hotel_room_number) || null,
-            adults, children, infants,
-            adultNet, childNet, 0, transferNet, otherNet,
-            adultSale, childSale, 0, transferSale, otherSale,
-            totalNet, totalSale,
-            paidToAgency, cashOnTour,
-            paymentStatus, agentCommPct,
-            remarks, v.deleted_at !== null, v.deleted_at || null,
-            v.created_at || new Date(), v.updated_at || new Date(),
+            toStr(v.voucher_number), deriveTourType(v), clientId, mgr,
+            companyId, tourId, agentId,
+            tourDate, tourTime, toStr(v.hotel_name)||null, toStr(v.hotel_room_number)||null,
+            adults, children,
+            aNet, cNet, tNet, oNet,
+            aSale, cSale, tSale, oSale,
+            totNet, totSale, paid, totSale-paid,
+            derivePaymentStatus(v), agtPct,
+            remarks, v.voucher_important===1,
+            v.deleted_at!==null, v.deleted_at||null,
+            v.created_at||new Date(), v.updated_at||new Date(),
           ]
         );
 
-        if (res.rows[0]?.inserted) voucherNew++; else voucherSkip++;
+        const row = res.rows[0];
+        if (row.is_insert) {
+          inserted++;
+          ok('NEW  #' + v.voucher_number + '  ' + cname);
+          if (paid > 0 && !v.deleted_at) {
+            const ex = await pgClient.query(
+              'SELECT id FROM payments WHERE voucher_id=$1 AND notes LIKE $2',
+              [row.id, 'Мигр%']
+            );
+            if (!ex.rows.length) {
+              await pgClient.query(
+                'INSERT INTO payments (voucher_id,payment_date,amount,payment_method,notes,created_by) VALUES ($1,$2,$3,$4,$5,$6)',
+                [row.id, v.created_at||new Date(), paid, toStr(v.voucher_money).toUpperCase()||'cash', 'Мигрировано', mgr]
+              );
+            }
+          }
+        } else {
+          updated++;
+          log('UPD  #' + v.voucher_number + '  ' + cname);
+        }
 
       } catch (e) {
-        err(`Voucher ${v.voucher_number}: ${e.message}`);
-        voucherErr++;
+        errors++;
+        bad('#' + v.voucher_number + ': ' + e.message);
       }
     }
 
-    await client.query('ALTER TABLE vouchers ENABLE TRIGGER trigger_update_voucher_totals');
+    await pgClient.query('ALTER TABLE vouchers ENABLE TRIGGER trigger_update_voucher_totals');
+    await pgClient.query('COMMIT');
 
-    // ── Payments for new vouchers ─────────────────────────────────────────────
-    // (Only insert payment if it doesn't already exist for this voucher)
-    log('Syncing payments…');
-    let paymentNew = 0;
-    for (const v of mysqlVouchers) {
-      const deposit = f(v.price_deposit);
-      if (deposit <= 0 || v.deleted_at) continue;
+    saveState({
+      lastSync: syncTime,
+      lastCount: changed.length,
+      synced: (state.synced || 0) + inserted + updated,
+      totalInserted: (state.totalInserted || 0) + inserted,
+    });
 
-      const pgV = await client.query(
-        'SELECT id FROM vouchers WHERE voucher_number=$1', [s(v.voucher_number)]
-      );
-      if (!pgV.rows.length) continue;
-      const pgVoucherId = pgV.rows[0].id;
-
-      const existing = await client.query(
-        `SELECT id FROM payments WHERE voucher_id=$1 AND notes LIKE '%price_deposit%'`,
-        [pgVoucherId]
-      );
-      if (existing.rows.length > 0) continue; // already synced
-
-      const newManagerId = userIdMap.get(v.voucher_created_user_id);
-      await client.query(
-        `INSERT INTO payments (voucher_id, payment_date, amount, payment_method, notes, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6)`,
-        [
-          pgVoucherId,
-          v.created_at || new Date(),
-          deposit,
-          s(v.voucher_money).toUpperCase() || 'cash',
-          `Мигрировано из price_deposit`,
-          newManagerId || null,
-        ]
-      );
-      paymentNew++;
-    }
-
-    await client.query('COMMIT');
-
-    log('');
-    log('════════════════════════════════');
-    log('       SYNC COMPLETE');
-    log('════════════════════════════════');
-    log(`  Vouchers new:     ${voucherNew}`);
-    log(`  Vouchers updated: ${voucherSkip}`);
-    log(`  Vouchers errors:  ${voucherErr}`);
-    log(`  Payments new:     ${paymentNew}`);
-    log(`  Cutoff date used: ${cutoffDate}`);
+    sec('Результат');
+    if (inserted) console.log('  Новых:      ' + inserted);
+    if (updated)  console.log('  Обновлено:  ' + updated);
+    if (errors)   console.log('  Ошибок:     ' + errors);
+    console.log();
+    if (errors === 0) ok('Синхронизация завершена успешно');
+    else wrn('Завершено с ' + errors + ' ошибками');
 
   } catch (e) {
-    await client.query('ROLLBACK');
-    err(`Sync rolled back: ${e.message}`);
+    try { await pgClient.query('ROLLBACK'); } catch(e2){}
+    bad('Транзакция откатана: ' + e.message);
     console.error(e);
     process.exit(1);
   } finally {
-    client.release();
+    pgClient.release();
     await pg.end();
   }
 }

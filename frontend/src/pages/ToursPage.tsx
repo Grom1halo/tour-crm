@@ -39,7 +39,7 @@ const ToursPage: React.FC = () => {
   const [editingSeason, setEditingSeason] = useState<any>(null);
   const [seasonForm, setSeasonForm] = useState({ label: '', validFrom: '', validTo: '', sortOrder: 0 });
 
-  const [formData, setFormData] = useState({ name: '', tourType: 'group', isActive: true, article: '', cancellationTerms: [] as string[] });
+  const [formData, setFormData] = useState({ name: '', tourType: 'group', isActive: true, article: '', cancellationTerms: [] as string[], companyId: '' });
   const [priceForm, setPriceForm] = useState({
     tourId: '', companyId: '', validFrom: '', validTo: '', article: '',
     adultNet: 0, childNet: 0, infantNet: 0, transferNet: 0, otherNet: 0,
@@ -107,13 +107,13 @@ const ToursPage: React.FC = () => {
 
   const openEdit = (tour: any) => {
     setEditing(tour);
-    setFormData({ name: tour.name, tourType: tour.tour_type, isActive: tour.is_active, article: tour.article || '', cancellationTerms: tour.cancellation_terms || [] });
+    setFormData({ name: tour.name, tourType: tour.tour_type, isActive: tour.is_active, article: tour.article || '', cancellationTerms: tour.cancellation_terms || [], companyId: tour.company_id ? String(tour.company_id) : '' });
     setShowModal(true);
   };
 
   const openCreate = () => {
     setEditing(null);
-    setFormData({ name: '', tourType: 'group', isActive: true, article: '', cancellationTerms: [] });
+    setFormData({ name: '', tourType: 'group', isActive: true, article: '', cancellationTerms: [], companyId: companyFilter || '' });
     setShowModal(true);
   };
 
@@ -334,6 +334,7 @@ const ToursPage: React.FC = () => {
                       <SortIcon k={k} />
                     </th>
                   ))}
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">{t.navCompanies}</th>
                   <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">{t.actions}</th>
                 </tr>
               </thead>
@@ -361,6 +362,7 @@ const ToursPage: React.FC = () => {
                         {tour.is_active ? t.toursActive : t.toursInactive}
                       </span>
                     </td>
+                    <td className="px-4 py-3 text-gray-500 text-sm">{tour.company_name || <span className="text-gray-300">—</span>}</td>
                     <td className="px-4 py-3 text-right space-x-3">
                       <button onClick={() => openPrices(tour)} className="text-purple-600 hover:text-purple-800 text-xs font-medium">{t.toursPricesBtn}</button>
                       <button onClick={() => openEdit(tour)} className="text-blue-600 hover:text-blue-800 text-xs font-medium">{t.editBtn}</button>
@@ -429,6 +431,13 @@ const ToursPage: React.FC = () => {
                       <option value="group">{t.typeGroup}</option>
                       <option value="individual">{t.typeIndividual}</option>
                       <option value="tourflot">{t.typeTourflot}</option>
+                    </select>
+                  </div>
+                  <div className="col-span-2">
+                    <label className={labelCls}>{t.navCompanies}</label>
+                    <select value={formData.companyId} onChange={e => setFormData({ ...formData, companyId: e.target.value })} className={inputCls}>
+                      <option value="">— не выбрана —</option>
+                      {companies.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
                     </select>
                   </div>
                 </div>

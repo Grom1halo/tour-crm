@@ -66,6 +66,7 @@ export const deletePayment = (id: number) => api.delete(`/payments/${id}`);
 export const getReportTotals = (params?: any) => api.get('/reports/totals', { params });
 export const getReportSummary = (params?: any) => api.get('/reports/summary', { params });
 export const getReportPayments = (params?: any) => api.get('/reports/payments', { params });
+export const getReportDetail = (params?: any) => api.get('/reports/detail', { params });
 
 // Companies
 export const getCompanies = (activeOnly = true) => api.get('/companies', { params: { activeOnly } });

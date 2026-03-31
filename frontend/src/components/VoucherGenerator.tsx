@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import html2canvas from 'html2canvas';
 
 interface VoucherGeneratorProps {
@@ -8,6 +8,8 @@ interface VoucherGeneratorProps {
 
 const VoucherGenerator: React.FC<VoucherGeneratorProps> = ({ voucher, onClose }) => {
   const ref = useRef<HTMLDivElement>(null);
+  const previewAreaRef = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(1);
 
   useEffect(() => {
     const link = document.createElement('link');
@@ -15,6 +17,18 @@ const VoucherGenerator: React.FC<VoucherGeneratorProps> = ({ voucher, onClose })
     link.href = 'https://fonts.googleapis.com/css2?family=Oswald:wght@400;600;700&family=Roboto:wght@400;500;700&display=swap';
     document.head.appendChild(link);
     return () => { document.head.removeChild(link); };
+  }, []);
+
+  useEffect(() => {
+    const VOUCHER_WIDTH = 920;
+    const updateScale = () => {
+      if (!previewAreaRef.current) return;
+      const available = previewAreaRef.current.clientWidth - 32; // 16px padding each side
+      setScale(Math.min(1, available / VOUCHER_WIDTH));
+    };
+    updateScale();
+    window.addEventListener('resize', updateScale);
+    return () => window.removeEventListener('resize', updateScale);
   }, []);
 
   const isTourflot = voucher.tour_type === 'tourflot';
@@ -91,21 +105,22 @@ const VoucherGenerator: React.FC<VoucherGeneratorProps> = ({ voucher, onClose })
       <div className="bg-white rounded-lg max-w-3xl w-full flex flex-col my-auto">
 
         {/* Modal controls */}
-        <div className="border-b px-6 py-4 flex justify-between items-center shrink-0">
-          <h2 className="text-xl font-bold text-gray-800">Ваучер № {voucher.voucher_number}</h2>
-          <div className="flex space-x-3">
-            <button onClick={download} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm font-medium">
+        <div className="border-b px-4 py-3 flex justify-between items-center shrink-0 gap-3">
+          <h2 className="text-base sm:text-xl font-bold text-gray-800 truncate">Ваучер № {voucher.voucher_number}</h2>
+          <div className="flex space-x-2 shrink-0">
+            <button onClick={download} className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-xs sm:text-sm font-medium whitespace-nowrap">
               ⬇ Скачать JPG
             </button>
-            <button onClick={onClose} className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition text-sm">
+            <button onClick={onClose} className="px-3 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition text-xs sm:text-sm whitespace-nowrap">
               Закрыть
             </button>
           </div>
         </div>
 
         {/* Voucher */}
-        <div className="overflow-auto p-4 flex justify-center bg-gray-100 min-h-0 flex-1">
-          <div ref={ref} style={{ width: 920, backgroundColor: '#fff', fontFamily: "'Roboto', Arial, sans-serif", borderRadius: 12, overflow: 'hidden', boxShadow: '0 4px 24px rgba(0,0,0,.12)' }}>
+        <div ref={previewAreaRef} className="overflow-auto p-4 flex justify-center bg-gray-100 min-h-0 flex-1">
+          <div style={{ width: 920 * scale, flexShrink: 0 }}>
+          <div ref={ref} style={{ width: 920, transformOrigin: 'top left', transform: `scale(${scale})`, backgroundColor: '#fff', fontFamily: "'Roboto', Arial, sans-serif", borderRadius: 12, overflow: 'hidden', boxShadow: '0 4px 24px rgba(0,0,0,.12)' }}>
 
             {/* ── HEADER ── */}
             {isTourflot ? (
@@ -298,6 +313,7 @@ const VoucherGenerator: React.FC<VoucherGeneratorProps> = ({ voucher, onClose })
               </div>
             )}
 
+          </div>
           </div>
         </div>
 

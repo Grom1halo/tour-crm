@@ -127,16 +127,30 @@ const VoucherDetailPage: React.FC = () => {
             {t.detailTitle} {voucher.voucher_number}
           </h1>
         </div>
-        <div className="flex space-x-3">
+        <div className="flex space-x-3 flex-wrap gap-2">
           <button
             onClick={() => setShowGenerator(true)}
-            className="px-6 py-3 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 transition flex items-center"
+            className="px-4 py-2 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 transition flex items-center text-sm"
           >
             {t.detailGenerate}
           </button>
           <button
+            onClick={() => {
+              const params = new URLSearchParams();
+              if (voucher.client_id) params.set('clientId', String(voucher.client_id));
+              if (voucher.client_name) params.set('clientName', voucher.client_name);
+              if (voucher.client_phone) params.set('clientPhone', voucher.client_phone);
+              if (voucher.hotel_name) params.set('hotel', voucher.hotel_name);
+              if (voucher.room_number) params.set('room', voucher.room_number);
+              navigate(`/vouchers/new?${params.toString()}`);
+            }}
+            className="px-4 py-2 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 transition text-sm"
+          >
+            + Новый ваучер для клиента
+          </button>
+          <button
             onClick={() => navigate(`/vouchers/${id}/edit`)}
-            className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition"
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition text-sm"
           >
             {t.detailEdit}
           </button>

@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import * as api from '../api';
 import { useLanguage } from '../i18n/LanguageContext';
 
 const VoucherFormPage: React.FC = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const isEdit = !!id;
   const { t } = useLanguage();
 
@@ -82,50 +83,69 @@ const VoucherFormPage: React.FC = () => {
   });
 
   useEffect(() => {
-    loadReferenceData();
-    if (isEdit) {
-      loadVoucher().then(() => {
+    const init = async () => {
+      await loadReferenceData();
+      if (isEdit) {
+        await loadVoucher();
         setTimeout(() => { skipEffects.current = false; }, 0);
-      });
-    }
+      } else {
+        // Pre-fill from URL params (clone for client)
+        const params = new URLSearchParams(location.search);
+        const clientId    = params.get('clientId');
+        const clientName  = params.get('clientName');
+        const clientPhone = params.get('clientPhone');
+        const hotel = params.get('hotel');
+        const room  = params.get('room');
+        if (clientId) {
+          // Ensure client appears in the select (may not be in the list for managers)
+          if (clientName) {
+            setClients(prev => {
+              const already = prev.find(c => String(c.id) === clientId);
+              if (already) return prev;
+              return [{ id: Number(clientId), name: clientName, phone: clientPhone || '' }, ...prev];
+            });
+          }
+          setFormData(prev => ({
+            ...prev,
+            clientId,
+            ...(hotel ? { hotelName: hotel } : {}),
+            ...(room ? { roomNumber: room } : {}),
+          }));
+        } else if (hotel || room) {
+          setFormData(prev => ({
+            ...prev,
+            ...(hotel ? { hotelName: hotel } : {}),
+            ...(room ? { roomNumber: room } : {}),
+          }));
+        }
+      }
+    };
+    init();
   }, [id]);
 
-  // When company changes — load tours for that company
-  useEffect(() => {
-    if (formData.companyId) {
-      api.getToursByCompany(Number(formData.companyId)).then(res => {
+  // Helper: load tours for a specific company (or all tours if no companyId)
+  const loadToursForCompany = (companyId: string, keepTourId?: string) => {
+    if (companyId) {
+      api.getToursByCompany(Number(companyId)).then(res => {
         setTours(res.data);
-        // Only reset tourId if user manually changed company (not initial edit load)
-        if (!skipEffects.current && !res.data.find((t: any) => String(t.id) === String(formData.tourId))) {
-          setFormData(prev => ({ ...prev, tourId: '' }));
+        // If current tourId not in new list, clear it (only during user interaction)
+        if (keepTourId === undefined) {
+          setFormData(prev => {
+            const stillValid = res.data.find((t: any) => String(t.id) === String(prev.tourId));
+            return stillValid ? prev : { ...prev, tourId: '' };
+          });
         }
       }).catch(() => {});
     } else {
       api.getTours().then(res => setTours(res.data)).catch(() => {});
     }
-  }, [formData.companyId]);
+  };
 
-  // When tour selected without company — find companies for this tour
+  // Clear companiesForTour hint when tour or company changes
   useEffect(() => {
     if (skipEffects.current) return;
-    const { tourId, companyId } = formData;
-    if (!tourId || companyId) { setCompaniesForTour(null); return; }
-
-    api.getCompaniesByTour(Number(tourId)).then(res => {
-      const list: any[] = res.data;
-      setCompaniesForTour(list.length > 0 ? list : null);
-      if (list.length === 1) {
-        // Only one company has this tour — auto-select it
-        skipEffects.current = true;
-        setFormData(prev => ({ ...prev, companyId: String(list[0].id) }));
-        // Load tours for that company, keeping current tourId
-        api.getToursByCompany(list[0].id).then(r => {
-          setTours(r.data);
-          setTimeout(() => { skipEffects.current = false; }, 0);
-        }).catch(() => { skipEffects.current = false; });
-      }
-    }).catch(() => {});
-  }, [formData.tourId]);
+    if (!formData.tourId || formData.companyId) setCompaniesForTour(null);
+  }, [formData.tourId, formData.companyId]);
 
   // Auto-fill prices when tour + company + date all selected
   useEffect(() => {
@@ -155,16 +175,15 @@ const VoucherFormPage: React.FC = () => {
 
   const loadReferenceData = async () => {
     try {
-      const [clientsRes, companiesRes, agentsRes] = await Promise.all([
+      const [clientsRes, companiesRes, agentsRes, toursRes] = await Promise.all([
         api.getClients(),
         api.getCompanies(),
         api.getAgents(),
+        api.getTours(),
       ]);
       setClients(clientsRes.data);
       setCompanies(companiesRes.data);
       setAgents(agentsRes.data);
-      // Tours loaded via company useEffect
-      const toursRes = await api.getTours();
       setTours(toursRes.data);
     } catch (error) {
       console.error('Failed to load reference data:', error);
@@ -204,6 +223,10 @@ const VoucherFormPage: React.FC = () => {
         isImportant: v.is_important || false,
         cancellationNotes: v.cancellation_notes || '',
       });
+      // If voucher has a company, load only that company's tours so dropdown is filtered
+      if (v.company_id) {
+        api.getToursByCompany(Number(v.company_id)).then(res => setTours(res.data)).catch(() => {});
+      }
       return true;
     } catch (error) {
       alert('Failed to load voucher');
@@ -442,7 +465,13 @@ const VoucherFormPage: React.FC = () => {
               <select
                 name="companyId"
                 value={formData.companyId}
-                onChange={e => { handleChange(e); setCompanySearch(''); setCompaniesForTour(null); }}
+                onChange={e => {
+                  const newCompanyId = e.target.value;
+                  setCompanySearch('');
+                  setCompaniesForTour(null);
+                  setFormData(prev => ({ ...prev, companyId: newCompanyId }));
+                  loadToursForCompany(newCompanyId);
+                }}
                 className={inputCls}
                 required
               >
@@ -510,7 +539,23 @@ const VoucherFormPage: React.FC = () => {
                   className="w-full px-3 py-1.5 mb-1 border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-400"
                 />
               )}
-              <select name="tourId" value={formData.tourId} onChange={e => { handleChange(e); setTourSearch(''); }} className={inputCls} required size={tourSearch ? Math.min(8, tours.filter(tour => {
+              <select name="tourId" value={formData.tourId} onChange={e => {
+                const newTourId = e.target.value;
+                const picked = tours.find((t: any) => String(t.id) === newTourId);
+                setTourSearch('');
+                const autoCompanyId = picked?.company_id && !formData.companyId
+                  ? String(picked.company_id)
+                  : null;
+                setFormData(prev => ({
+                  ...prev,
+                  tourId: newTourId,
+                  ...(autoCompanyId ? { companyId: autoCompanyId } : {}),
+                }));
+                // If we just auto-filled a company, load that company's tours
+                if (autoCompanyId) {
+                  loadToursForCompany(autoCompanyId, newTourId);
+                }
+              }} className={inputCls} required size={tourSearch ? Math.min(8, tours.filter(tour => {
                 const q = tourSearch.toLowerCase();
                 const art = (tour.price_article || tour.tour_article || tour.article || '').toLowerCase();
                 return tour.name.toLowerCase().includes(q) || art.includes(q);

@@ -69,24 +69,39 @@ export const updateCompany = async (req: AuthRequest, res: Response) => {
   }
 };
 
+export const deleteCompany = async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    await pool.query('UPDATE companies SET is_active = false, updated_at = CURRENT_TIMESTAMP WHERE id = $1', [id]);
+    res.json({ message: 'Company deactivated' });
+  } catch (error) {
+    console.error('Delete company error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
 // ===== TOURS =====
 export const getTours = async (req: AuthRequest, res: Response) => {
   try {
     const { activeOnly, tourType } = req.query;
-    
-    let query = 'SELECT * FROM tours WHERE 1=1';
+
+    let query = `
+      SELECT t.*, c.name AS company_name
+      FROM tours t
+      LEFT JOIN companies c ON t.company_id = c.id
+      WHERE 1=1`;
     const params: any[] = [];
 
     if (activeOnly === 'true') {
-      query += ' AND is_active = true';
+      query += ' AND t.is_active = true';
     }
 
     if (tourType) {
-      query += ` AND tour_type = $${params.length + 1}`;
+      query += ` AND t.tour_type = $${params.length + 1}`;
       params.push(tourType);
     }
 
-    query += ' ORDER BY name';
+    query += ' ORDER BY t.name';
 
     const result = await pool.query(query, params);
     res.json(result.rows);
@@ -98,15 +113,15 @@ export const getTours = async (req: AuthRequest, res: Response) => {
 
 export const createTour = async (req: AuthRequest, res: Response) => {
   try {
-    const { name, tourType, cancellationTerms, article } = req.body;
+    const { name, tourType, cancellationTerms, article, companyId } = req.body;
 
     if (!name || !tourType) {
       return res.status(400).json({ error: 'Name and tourType required' });
     }
 
     const result = await pool.query(
-      'INSERT INTO tours (name, tour_type, cancellation_terms, article) VALUES ($1, $2, $3, $4) RETURNING *',
-      [name, tourType, cancellationTerms || [], article || '']
+      'INSERT INTO tours (name, tour_type, cancellation_terms, article, company_id) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+      [name, tourType, cancellationTerms || [], article || '', companyId || null]
     );
 
     res.status(201).json(result.rows[0]);
@@ -125,13 +140,15 @@ export const updateTour = async (req: AuthRequest, res: Response) => {
     // Auto-clear needs_attention if cancellation terms are set
     const hasTerms = terms.length > 0;
 
+    const { companyId } = req.body;
     const result = await pool.query(
       `UPDATE tours
-       SET name = $1, tour_type = $2, is_active = $3, cancellation_terms = $4, article = $5, updated_at = CURRENT_TIMESTAMP,
-           needs_attention = CASE WHEN $6 THEN false ELSE needs_attention END
-       WHERE id = $7
+       SET name = $1, tour_type = $2, is_active = $3, cancellation_terms = $4, article = $5, company_id = $6,
+           updated_at = CURRENT_TIMESTAMP,
+           needs_attention = CASE WHEN $7 THEN false ELSE needs_attention END
+       WHERE id = $8
        RETURNING *`,
-      [name, tourType, isActive, terms, article || '', hasTerms, id]
+      [name, tourType, isActive, terms, article || '', companyId || null, hasTerms, id]
     );
 
     if (result.rows.length === 0) {
@@ -141,6 +158,17 @@ export const updateTour = async (req: AuthRequest, res: Response) => {
     res.json(result.rows[0]);
   } catch (error) {
     console.error('Update tour error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+export const deleteTour = async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    await pool.query('UPDATE tours SET is_active = false, updated_at = CURRENT_TIMESTAMP WHERE id = $1', [id]);
+    res.json({ message: 'Tour deactivated' });
+  } catch (error) {
+    console.error('Delete tour error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 };

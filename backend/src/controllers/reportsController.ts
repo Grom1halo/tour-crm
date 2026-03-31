@@ -232,3 +232,87 @@ export const getPaymentsReport = async (req: AuthRequest, res: Response) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 };
+
+// Detailed per-voucher report
+export const getDetailReport = async (req: AuthRequest, res: Response) => {
+  try {
+    const { dateFrom, dateTo, managerId, dateType = 'sale' } = req.query;
+    const user = req.user!;
+    const dateField = dateType === 'tour' ? 'v.tour_date::date' : 'v.created_at::date';
+
+    const params: any[] = [];
+    let p = 1;
+    let filters = '';
+
+    if (dateFrom) { filters += ` AND ${dateField} >= $${p++}`; params.push(dateFrom); }
+    if (dateTo)   { filters += ` AND ${dateField} <= $${p++}`; params.push(dateTo); }
+
+    const userRoles: string[] = (user as any).roles || [user.role];
+    if (userRoles.includes('manager') && !userRoles.includes('admin') && !userRoles.includes('accountant')) {
+      filters += ` AND v.manager_id = $${p++}`;
+      params.push(user.id);
+    } else if (managerId) {
+      filters += ` AND v.manager_id = $${p++}`;
+      params.push(managerId);
+    }
+
+    const result = await pool.query(
+      `SELECT
+        v.id,
+        v.voucher_number,
+        v.created_at,
+        v.tour_date,
+        v.tour_time,
+        co.name AS company_name,
+        t.name AS tour_name,
+        v.hotel_name,
+        v.room_number,
+        v.adults,
+        v.children,
+        v.infants,
+        v.total_sale,
+        v.total_net,
+        (v.total_sale - v.total_net) AS profit,
+        ag.name AS agent_name,
+        v.agent_commission_percentage,
+        CASE WHEN v.agent_id IS NOT NULL
+          THEN ROUND((v.total_sale - v.total_net) * COALESCE(v.agent_commission_percentage, 0) / 100.0)
+          ELSE 0 END AS agent_commission,
+        CASE WHEN v.agent_id IS NOT NULL
+          THEN ROUND((v.total_sale - v.total_net) * (1 - COALESCE(v.agent_commission_percentage, 0) / 100.0))
+          ELSE (v.total_sale - v.total_net) END AS profit_after_agent,
+        u.commission_percentage AS manager_commission_percentage,
+        ROUND(
+          CASE WHEN v.agent_id IS NOT NULL
+            THEN (v.total_sale - v.total_net) * (1 - COALESCE(v.agent_commission_percentage, 0) / 100.0)
+            ELSE (v.total_sale - v.total_net) END
+          * COALESCE(u.commission_percentage, 0) / 100.0
+        ) AS manager_pay,
+        v.paid_to_agency,
+        v.cash_on_tour,
+        v.payment_status,
+        (SELECT MAX(p2.payment_date) FROM payments p2 WHERE p2.voucher_id = v.id) AS last_payment_date,
+        (SELECT string_agg(DISTINCT p2.payment_method, ', ' ORDER BY p2.payment_method)
+          FROM payments p2 WHERE p2.voucher_id = v.id) AS payment_methods,
+        v.remarks,
+        cl.name AS client_name,
+        cl.phone AS client_phone,
+        u.full_name AS manager_name
+      FROM vouchers v
+      JOIN users u ON v.manager_id = u.id
+      LEFT JOIN companies co ON v.company_id = co.id
+      LEFT JOIN tours t ON v.tour_id = t.id
+      LEFT JOIN agents ag ON v.agent_id = ag.id
+      LEFT JOIN clients cl ON v.client_id = cl.id
+      WHERE v.is_deleted = false ${filters}
+      ORDER BY v.created_at DESC
+      LIMIT 2000`,
+      params
+    );
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Detail report error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};

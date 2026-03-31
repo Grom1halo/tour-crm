@@ -15,3 +15,104 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+/* ── DARK MODE ────────────────────────────────────────────── */
+.dark {
+  color-scheme: dark;
+}
+.dark body {
+  background-color: #0f172a;
+  color: #f1f5f9;
+}
+
+/* Backgrounds */
+.dark .bg-white        { background-color: #1e293b !important; }
+.dark .bg-gray-50      { background-color: #0f172a !important; }
+.dark .bg-gray-100     { background-color: #1e293b !important; }
+.dark .bg-gray-200     { background-color: #334155 !important; }
+.dark .min-h-screen    { background-color: #0f172a; }
+
+/* Text */
+.dark .text-gray-900   { color: #f1f5f9 !important; }
+.dark .text-gray-800   { color: #e2e8f0 !important; }
+.dark .text-gray-700   { color: #cbd5e1 !important; }
+.dark .text-gray-600   { color: #94a3b8 !important; }
+.dark .text-gray-500   { color: #64748b !important; }
+.dark .text-gray-400   { color: #475569 !important; }
+
+/* Borders */
+.dark .border-gray-100 { border-color: #334155 !important; }
+.dark .border-gray-200 { border-color: #334155 !important; }
+.dark .border-gray-300 { border-color: #475569 !important; }
+
+/* Shadows — lighten for dark bg */
+.dark .shadow-sm       { box-shadow: 0 1px 3px 0 rgba(0,0,0,0.5) !important; }
+.dark .shadow          { box-shadow: 0 1px 6px 0 rgba(0,0,0,0.6) !important; }
+
+/* Hover states */
+.dark .hover\:bg-gray-50:hover  { background-color: #334155 !important; }
+.dark .hover\:bg-gray-100:hover { background-color: #334155 !important; }
+.dark .hover\:bg-blue-50:hover  { background-color: #1e3a5f !important; }
+
+/* Blue tints (active nav, selected tabs, cards) */
+.dark .bg-blue-50      { background-color: #1e3a5f !important; }
+.dark .bg-blue-100     { background-color: #1e3a5f !important; }
+.dark .text-blue-700   { color: #60a5fa !important; }
+.dark .text-blue-600   { color: #60a5fa !important; }
+.dark .border-blue-600 { border-color: #3b82f6 !important; }
+
+/* Status badges */
+.dark .bg-green-100    { background-color: #052e16 !important; }
+.dark .text-green-700  { color: #4ade80 !important; }
+.dark .bg-yellow-100   { background-color: #2d1d00 !important; }
+.dark .text-yellow-700 { color: #fbbf24 !important; }
+.dark .bg-red-100      { background-color: #450a0a !important; }
+.dark .text-red-700    { color: #f87171 !important; }
+.dark .text-red-500    { color: #f87171 !important; }
+.dark .text-red-600    { color: #f87171 !important; }
+
+/* Form inputs */
+.dark input[type="text"],
+.dark input[type="date"],
+.dark input[type="email"],
+.dark input[type="password"],
+.dark input[type="number"],
+.dark input[type="tel"],
+.dark textarea,
+.dark select {
+  background-color: #334155 !important;
+  border-color: #475569 !important;
+  color: #f1f5f9 !important;
+}
+.dark input::placeholder,
+.dark textarea::placeholder { color: #64748b !important; }
+.dark option { background-color: #1e293b; }
+
+/* Dividers */
+.dark .divide-gray-100 > * + * { border-color: #334155 !important; }
+.dark .divide-gray-200 > * + * { border-color: #334155 !important; }
+
+/* Header */
+.dark header.bg-white  { background-color: #1e293b !important; }
+
+/* Purple accents */
+.dark .bg-purple-100   { background-color: #2d1b4e !important; }
+.dark .text-purple-700 { color: #c084fc !important; }
+.dark .bg-purple-600   { background-color: #7c3aed !important; }
+.dark .hover\:bg-purple-700:hover { background-color: #6d28d9 !important; }
+
+/* Orange/amber */
+.dark .bg-orange-100   { background-color: #3d1a00 !important; }
+.dark .text-orange-700 { color: #fb923c !important; }
+
+/* Tables alternating rows */
+.dark tbody tr:nth-child(even) td { background-color: #1e293b !important; }
+.dark tbody tr:nth-child(odd)  td { background-color: #0f172a !important; }
+.dark thead { background-color: #1e293b !important; }
+.dark tfoot { background-color: #1e293b !important; }
+
+/* Scrollbars */
+.dark ::-webkit-scrollbar       { width: 8px; height: 8px; }
+.dark ::-webkit-scrollbar-track { background: #0f172a; }
+.dark ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+.dark ::-webkit-scrollbar-thumb:hover { background: #475569; }

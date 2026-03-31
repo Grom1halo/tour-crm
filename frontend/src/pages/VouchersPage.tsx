@@ -6,7 +6,7 @@ import { useLanguage } from '../i18n/LanguageContext';
 import { format } from 'date-fns';
 
 const VouchersPage: React.FC = () => {
-  const { user } = useAuth();
+  const { user, hasRole } = useAuth();
   const { t } = useLanguage();
   const [vouchers, setVouchers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -41,7 +41,7 @@ const VouchersPage: React.FC = () => {
   });
 
   useEffect(() => {
-    if (user?.role !== 'manager') {
+    if (hasRole('admin', 'accountant')) {
       api.getManagers().then(res => setManagers(res.data)).catch(() => {});
     }
   }, [user]);
@@ -134,7 +134,7 @@ const VouchersPage: React.FC = () => {
             <option value="paid">{t.statusPaid}</option>
           </select>
 
-          {user?.role !== 'manager' && (
+          {hasRole('admin', 'accountant') && (
             <select value={managerId} onChange={e => setManagerId(e.target.value)} className={inputCls}>
               <option value="">{t.vouchersAllManagers}</option>
               {managers.map(m => (
@@ -191,7 +191,7 @@ const VouchersPage: React.FC = () => {
                       th(t.colTourDate, 'tour_date'),
                       th(t.colClient,   'client_name'),
                       th(t.colPhone),
-                      user?.role !== 'manager' ? th(t.colManager) : null,
+                      hasRole('admin', 'accountant') ? th(t.colManager) : null,
                       th(t.colCompany,  'company_name'),
                       th(t.colTour),
                       th(t.colAmount,   'total_sale', 'text-right'),
@@ -222,7 +222,7 @@ const VouchersPage: React.FC = () => {
                     </td>
                     <td className="px-3 py-2 text-gray-800">{v.client_name}</td>
                     <td className="px-3 py-2 text-gray-500">{v.client_phone}</td>
-                    {user?.role !== 'manager' && (
+                    {hasRole('admin', 'accountant') && (
                       <td className="px-3 py-2 text-gray-500">{v.manager_name}</td>
                     )}
                     <td className="px-3 py-2 text-gray-500">{v.company_name}</td>
