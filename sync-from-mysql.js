@@ -3,6 +3,7 @@
  * ИНКРЕМЕНТАЛЬНАЯ СИНХРОНИЗАЦИЯ: MySQL (Laravel) → PostgreSQL (новый сайт)
  *
  * Тянет только новые и изменённые ваучеры с момента последней синхронизации.
+ * Компании, туры и менеджеры — только ищутся в PG, НЕ создаются.
  * Клиенты и агенты создаются автоматически если ещё не существуют.
  *
  * Зависимости (уже есть от migrate-from-mysql.js):
@@ -145,18 +146,56 @@ async function main() {
   const mgrIds     = uniq(changed.map(v => v.voucher_created_user_id));
   const inList     = ids => ids.map(() => '?').join(',');
 
+  // Читаем имена из MySQL для поиска в PG
   const [mysqlCompanies] = companyIds.length
-    ? await my.execute('SELECT * FROM companies WHERE id IN (' + inList(companyIds) + ')', companyIds) : [[]];
+    ? await my.execute('SELECT id, name FROM companies WHERE id IN (' + inList(companyIds) + ')', companyIds) : [[]];
   const [mysqlTours] = tourIds.length
-    ? await my.execute('SELECT * FROM company_tours WHERE id IN (' + inList(tourIds) + ')', tourIds) : [[]];
+    ? await my.execute('SELECT id, tour_name FROM company_tours WHERE id IN (' + inList(tourIds) + ')', tourIds) : [[]];
   const [mysqlUsers] = mgrIds.length
-    ? await my.execute('SELECT * FROM users WHERE id IN (' + inList(mgrIds) + ')', mgrIds) : [[]];
+    ? await my.execute('SELECT id, name, email FROM users WHERE id IN (' + inList(mgrIds) + ')', mgrIds) : [[]];
 
-  log('Справочники: ' + mysqlCompanies.length + ' компаний, ' + mysqlTours.length + ' туров, ' + mysqlUsers.length + ' менеджеров');
+  log('Справочники из MySQL: ' + mysqlCompanies.length + ' компаний, ' + mysqlTours.length + ' туров, ' + mysqlUsers.length + ' менеджеров');
   await my.end();
 
   if (DRY_RUN) {
-    sec('Предпросмотр (dry-run, первые 30)');
+    // При dry-run тоже подключаем PG чтобы показать какие справочники найдутся
+    if (!pg) {
+      try {
+        pg = new Pool(PG_CONFIG);
+        await pg.query('SELECT 1');
+        ok('PostgreSQL: ' + PG_CONFIG.host + '/' + PG_CONFIG.database + ' (dry-run lookup)');
+      } catch (e) {
+        wrn('PostgreSQL недоступен, lookup справочников пропущен: ' + e.message);
+        pg = null;
+      }
+    }
+
+    sec('Предпросмотр (dry-run)');
+
+    if (pg) {
+      const pgc = await pg.connect();
+      try {
+        for (const c of mysqlCompanies) {
+          const r = await pgc.query('SELECT id FROM companies WHERE LOWER(name)=LOWER($1) LIMIT 1', [toStr(c.name)]);
+          if (r.rows.length) ok('Компания найдена: "' + toStr(c.name) + '" → id=' + r.rows[0].id);
+          else wrn('Компания НЕ найдена: "' + toStr(c.name) + '"');
+        }
+        for (const t of mysqlTours) {
+          const r = await pgc.query('SELECT id FROM tours WHERE LOWER(name)=LOWER($1) LIMIT 1', [toStr(t.tour_name)]);
+          if (r.rows.length) ok('Тур найден: "' + toStr(t.tour_name) + '" → id=' + r.rows[0].id);
+          else wrn('Тур НЕ найден: "' + toStr(t.tour_name) + '"');
+        }
+        for (const u of mysqlUsers) {
+          const uname = toStr(u.email).split('@')[0] || ('user_' + u.id);
+          let r = await pgc.query('SELECT id FROM users WHERE username=$1', [uname]);
+          if (!r.rows.length) r = await pgc.query('SELECT id FROM users WHERE LOWER(full_name)=LOWER($1) LIMIT 1', [toStr(u.name)]);
+          if (r.rows.length) ok('Менеджер найден: "' + toStr(u.name) + '" → id=' + r.rows[0].id);
+          else wrn('Менеджер НЕ найден: "' + toStr(u.name) + '"');
+        }
+      } finally { pgc.release(); await pg.end(); }
+    }
+
+    log('Ваучеров к обработке: ' + changed.length + ' (первые 30):');
     for (const v of changed.slice(0, 30)) {
       const isNew  = new Date(v.created_at) >= since;
       const label  = isNew ? C.green('NEW') : C.yellow('UPD');
@@ -174,48 +213,44 @@ async function main() {
   try {
     await pgClient.query('BEGIN');
 
-    // Upsert менеджеры
+    // ── Поиск менеджеров в PG (только lookup, не создаём) ─────────────────────
     const userIdMap = new Map();
     for (const u of mysqlUsers) {
       const uname = toStr(u.email).split('@')[0] || ('user_' + u.id);
-      const res = await pgClient.query(
-        'INSERT INTO users (username,password_hash,full_name,role,commission_percentage,is_active) VALUES ($1,$2,$3,$4,$5,true) ON CONFLICT (username) DO UPDATE SET full_name=EXCLUDED.full_name, commission_percentage=EXCLUDED.commission_percentage RETURNING id',
-        [uname, u.password || '$2b$10$placeholder', toStr(u.name) || uname, 'manager', toFloat(u.manager_percent)]
-      );
-      userIdMap.set(u.id, res.rows[0].id);
+      // Ищем по username (email-часть) или по полному имени
+      let res = await pgClient.query('SELECT id FROM users WHERE username=$1', [uname]);
+      if (!res.rows.length) {
+        res = await pgClient.query('SELECT id FROM users WHERE LOWER(full_name)=LOWER($1) LIMIT 1', [toStr(u.name)]);
+      }
+      if (res.rows.length) {
+        userIdMap.set(u.id, res.rows[0].id);
+      } else {
+        wrn('Менеджер не найден в PG: "' + toStr(u.name) + '" (username=' + uname + ') → manager_id=null');
+      }
     }
 
-    // Upsert компании
+    // ── Поиск компаний в PG (только lookup, не создаём) ──────────────────────
     const companyIdMap = new Map();
     for (const c of mysqlCompanies) {
-      const res = await pgClient.query(
-        'INSERT INTO companies (name,is_active) VALUES ($1,true) ON CONFLICT (name) DO UPDATE SET name=EXCLUDED.name RETURNING id',
-        [toStr(c.name)]
-      );
-      companyIdMap.set(c.id, res.rows[0].id);
+      const cname = toStr(c.name);
+      const res = await pgClient.query('SELECT id FROM companies WHERE LOWER(name)=LOWER($1) LIMIT 1', [cname]);
+      if (res.rows.length) {
+        companyIdMap.set(c.id, res.rows[0].id);
+      } else {
+        wrn('Компания не найдена в PG: "' + cname + '" → company_id=null');
+      }
     }
 
-    // Upsert туры
+    // ── Поиск туров в PG (только lookup, не создаём) ──────────────────────────
     const tourIdMap = new Map();
     for (const t of mysqlTours) {
       const tname = toStr(t.tour_name);
       if (!tname) continue;
-      let res = await pgClient.query(
-        'INSERT INTO tours (name,tour_type,is_active) VALUES ($1,$2,true) ON CONFLICT DO NOTHING RETURNING id',
-        [tname, 'group']
-      );
-      if (!res.rows.length) {
-        res = await pgClient.query('SELECT id FROM tours WHERE name=$1', [tname]);
-      }
-      const tid = res.rows[0] && res.rows[0].id;
-      if (!tid) continue;
-      tourIdMap.set(t.id, tid);
-      const cid = companyIdMap.get(t.company_id);
-      if (cid) {
-        await pgClient.query(
-          'INSERT INTO tour_prices (tour_id,company_id,valid_from,valid_to,adult_net,child_net,infant_net,transfer_net,other_net,adult_sale,child_sale,infant_sale,transfer_sale,other_sale) VALUES ($1,$2,$3,$4,$5,$6,0,0,0,$5,$6,0,0,0) ON CONFLICT DO NOTHING',
-          [tid, cid, '2020-01-01', '2099-12-31', toFloat(t.price_nett_adult), toFloat(t.price_nett_child)]
-        );
+      const res = await pgClient.query('SELECT id FROM tours WHERE LOWER(name)=LOWER($1) LIMIT 1', [tname]);
+      if (res.rows.length) {
+        tourIdMap.set(t.id, res.rows[0].id);
+      } else {
+        wrn('Тур не найден в PG: "' + tname + '" → tour_id=null');
       }
     }
 
@@ -223,27 +258,28 @@ async function main() {
 
     for (const v of changed) {
       try {
-        // Менеджер
-        let mgr = userIdMap.get(v.voucher_created_user_id);
-        if (!mgr) {
-          const un = 'user_' + v.voucher_created_user_id;
-          const r = await pgClient.query(
-            'INSERT INTO users (username,password_hash,full_name,role,commission_percentage,is_active) VALUES ($1,$2,$3,$4,0,true) ON CONFLICT (username) DO UPDATE SET username=EXCLUDED.username RETURNING id',
-            [un, '$2b$10$placeholder', 'Manager ' + v.voucher_created_user_id, 'manager']
-          );
-          mgr = r.rows[0].id;
-        }
+        // Менеджер — только поиск
+        const mgr = userIdMap.get(v.voucher_created_user_id) || null;
 
-        // Клиент
+        // Клиент (upsert при известном mgr, поиск по телефону при null)
         const phone = toStr(v.client_phone);
         const cname = toStr(v.client_name) || 'Unknown';
         let clientId = null;
         if (phone || cname !== 'Unknown') {
-          const r = await pgClient.query(
-            'INSERT INTO clients (name,phone,manager_id) VALUES ($1,$2,$3) ON CONFLICT (phone,manager_id) DO UPDATE SET name=EXCLUDED.name RETURNING id',
-            [cname, phone || '', mgr]
-          );
-          clientId = r.rows[0].id;
+          if (mgr !== null) {
+            const r = await pgClient.query(
+              'INSERT INTO clients (name,phone,manager_id) VALUES ($1,$2,$3) ON CONFLICT (phone,manager_id) DO UPDATE SET name=EXCLUDED.name RETURNING id',
+              [cname, phone || '', mgr]
+            );
+            clientId = r.rows[0].id;
+          } else if (phone) {
+            // Менеджер неизвестен — ищем клиента только по телефону
+            let r = await pgClient.query('SELECT id FROM clients WHERE phone=$1 LIMIT 1', [phone]);
+            if (!r.rows.length) {
+              r = await pgClient.query('INSERT INTO clients (name,phone,manager_id) VALUES ($1,$2,NULL) RETURNING id', [cname, phone]);
+            }
+            clientId = r.rows[0].id;
+          }
         }
 
         // Агент
