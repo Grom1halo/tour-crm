@@ -8,17 +8,19 @@ export const addPayment = async (req: AuthRequest, res: Response) => {
   try {
     await client.query('BEGIN');
 
-    const { voucherId, paymentDate, amount, paymentMethod, companyId, notes } = req.body;
+    const { voucherId, paymentDate, amount, paymentMethod, companyId, notes, isRefund } = req.body;
     const user = req.user!;
 
-    if (!voucherId || !paymentDate || !amount || !paymentMethod) {
+    if (!voucherId || !paymentDate || !amount) {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: 'Missing required fields' });
     }
+    const effectiveMethod = paymentMethod || 'Не указан';
+    const refund = !!isRefund;
 
     // Check voucher exists and user has access
     const voucherCheck = await client.query(
-      'SELECT manager_id FROM vouchers WHERE id = $1',
+      'SELECT manager_id, company_id FROM vouchers WHERE id = $1',
       [voucherId]
     );
 
@@ -33,14 +35,59 @@ export const addPayment = async (req: AuthRequest, res: Response) => {
     }
 
     const result = await client.query(
-      `INSERT INTO payments (voucher_id, payment_date, amount, payment_method, company_id, notes, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO payments (voucher_id, payment_date, amount, payment_method, company_id, notes, is_refund, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING *`,
-      [voucherId, paymentDate, amount, paymentMethod, companyId, notes, user.id]
+      [voucherId, paymentDate, amount, effectiveMethod, companyId, notes, refund, user.id]
     );
 
+    const newPayment = result.rows[0];
+    const voucherCompanyId = voucherCheck.rows[0].company_id;
+
+    // Auto-sync: create accounting_entries record for this payment
+    try {
+      const voucherInfo = await client.query(
+        `SELECT v.voucher_number, c.name as client_name
+         FROM vouchers v
+         LEFT JOIN clients c ON v.client_id = c.id
+         WHERE v.id = $1`,
+        [voucherId]
+      );
+      const vInfo = voucherInfo.rows[0];
+      const counterparty = vInfo ? `Ваучер ${vInfo.voucher_number}${vInfo.client_name ? ' — ' + vInfo.client_name : ''}` : `Ваучер #${voucherId}`;
+
+      if (refund) {
+        // Возврат — расход (деньги уходят из кассы обратно клиенту)
+        await client.query(
+          `INSERT INTO accounting_entries
+             (entry_date, entry_type, payment_method, counterparty_name, amount, notes, source, payment_id, created_by)
+           VALUES ($1, 'expense', $2, $3, $4, $5, 'auto', $6, $7)`,
+          [paymentDate, effectiveMethod, `Возврат: ${counterparty}`, amount, notes || null, newPayment.id, user.id]
+        );
+      } else if (effectiveMethod === 'Депозит в компанию') {
+        // Депозит в компанию: приход в движение средств + запись оплаты оператору (требует подтверждения)
+        await client.query(
+          `INSERT INTO accounting_entries
+             (entry_date, entry_type, payment_method, counterparty_name, company_id, amount, notes, category, source, payment_id, requires_confirmation, created_by)
+           VALUES ($1, 'expense', $2, $3, $4, $5, $6, 'Депозит в компанию', 'auto', $7, true, $8)`,
+          [paymentDate, effectiveMethod, counterparty, voucherCompanyId, amount, notes || null, newPayment.id, user.id]
+        );
+      } else {
+        // Обычный платёж — приход
+        await client.query(
+          `INSERT INTO accounting_entries
+             (entry_date, entry_type, payment_method, counterparty_name, amount, notes, source, payment_id, created_by)
+           VALUES ($1, 'income', $2, $3, $4, $5, 'auto', $6, $7)`,
+          [paymentDate, effectiveMethod, counterparty, amount, notes || null, newPayment.id, user.id]
+        );
+      }
+    } catch (syncErr) {
+      console.error('Auto-sync accounting_entries warning:', syncErr);
+      // Non-fatal: payment was saved, just sync failed
+    }
+
     await client.query('COMMIT');
-    res.status(201).json(result.rows[0]);
+    res.status(201).json(newPayment);
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('Add payment error:', error);
@@ -127,6 +174,7 @@ export const deletePayment = async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ error: 'Access denied' });
     }
 
+    await client.query('DELETE FROM accounting_entries WHERE payment_id = $1', [id]);
     await client.query('DELETE FROM payments WHERE id = $1', [id]);
 
     await client.query('COMMIT');

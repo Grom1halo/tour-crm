@@ -394,9 +394,9 @@ export const deleteAgent = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
     // Check if agent is used in any vouchers
-    const check = await pool.query('SELECT COUNT(*) FROM vouchers WHERE agent_id=$1 AND is_deleted=false', [id]);
+    const check = await pool.query('SELECT COUNT(*) FROM vouchers WHERE agent_id=$1', [id]);
     if (parseInt(check.rows[0].count) > 0) {
-      // Has active vouchers — soft delete only
+      // Has linked vouchers (even deleted ones) — soft delete only
       await pool.query('UPDATE agents SET is_active=false, updated_at=CURRENT_TIMESTAMP WHERE id=$1', [id]);
       return res.json({ message: 'Agent deactivated (has linked vouchers)' });
     }

@@ -5,7 +5,7 @@ import pool from '../config/database';
 
 export const login = async (req: Request, res: Response) => {
   try {
-    const { username, password } = req.body;
+    const { username, password, rememberMe } = req.body;
 
     if (!username || !password) {
       return res.status(400).json({ error: 'Username and password required' });
@@ -32,10 +32,11 @@ export const login = async (req: Request, res: Response) => {
 
     const userRoles: string[] = (user.roles && user.roles.length > 0) ? user.roles : [user.role];
 
+    const expiresIn = rememberMe ? '30d' : '1d';
     const token = jwt.sign(
       { id: user.id, username: user.username, role: user.role, roles: userRoles },
       process.env.JWT_SECRET || 'secret',
-      { expiresIn: (process.env.JWT_EXPIRES_IN || '7d') as any }
+      { expiresIn: expiresIn as any }
     );
 
     res.json({

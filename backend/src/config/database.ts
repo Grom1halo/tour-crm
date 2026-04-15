@@ -1,7 +1,12 @@
-import { Pool } from 'pg';
+import { Pool, types } from 'pg';
 import dotenv from 'dotenv';
 
 dotenv.config();
+
+// Return DATE columns as plain strings (e.g. "2026-04-03") instead of Date objects.
+// Without this, pg converts DATE to a JS Date at midnight Moscow time (UTC+3),
+// which shifts dates by 3 hours and breaks date comparisons in UTC.
+types.setTypeParser(1082, (val: string) => val);
 
 const pool = new Pool({
   host: process.env.DB_HOST || 'localhost',
