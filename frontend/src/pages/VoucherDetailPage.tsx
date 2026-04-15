@@ -353,10 +353,29 @@ const VoucherDetailPage: React.FC = () => {
                   ฿{Number(voucher.paid_to_agency).toFixed(2)}
                 </span>
               </div>
+              {Number(voucher.cash_on_tour) > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Депозит в компанию (кэш на туре)</span>
+                  <span className="font-semibold text-amber-600">
+                    +฿{Number(voucher.cash_on_tour).toFixed(2)}
+                  </span>
+                </div>
+              )}
+              {Number(voucher.cash_on_tour) > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-gray-600 font-medium">Итого оплачено</span>
+                  <span className="font-bold text-green-700">
+                    ฿{(Number(voucher.paid_to_agency) + Number(voucher.cash_on_tour)).toFixed(2)}
+                  </span>
+                </div>
+              )}
               <div className="flex justify-between pb-3 border-b">
-                <span className="text-gray-600">{t.detailCashOnTour}</span>
-                <span className={`font-semibold ${voucher.cash_on_tour > 0 ? 'text-red-600' : 'text-gray-800'}`}>
-                  ฿{Number(voucher.cash_on_tour).toFixed(2)}
+                <span className="text-gray-600">Остаток к оплате</span>
+                <span className={`font-semibold ${
+                  Number(voucher.total_sale) - Number(voucher.paid_to_agency) - Number(voucher.cash_on_tour || 0) > 0.01
+                    ? 'text-red-600' : 'text-green-600'
+                }`}>
+                  ฿{Math.max(0, Number(voucher.total_sale) - Number(voucher.paid_to_agency) - Number(voucher.cash_on_tour || 0)).toFixed(2)}
                 </span>
               </div>
               <div className="flex justify-between pt-3">

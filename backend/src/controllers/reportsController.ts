@@ -297,6 +297,8 @@ export const getDetailReport = async (req: AuthRequest, res: Response) => {
         ) AS manager_pay,
         v.paid_to_agency,
         v.cash_on_tour,
+        (v.paid_to_agency + COALESCE(v.cash_on_tour, 0)) AS paid_total,
+        GREATEST(0, v.total_sale - v.paid_to_agency - COALESCE(v.cash_on_tour, 0)) AS remaining,
         v.payment_status,
         v.agent_manager_confirmed,
         v.agent_accountant_confirmed,

@@ -1301,6 +1301,7 @@ const AccountingDetailTable: React.FC<{ rows: any[]; onConfirmToggle: () => void
     acc.children += Number(r.children || 0);
     acc.paid += Number(r.paid_to_agency || 0);
     acc.cash += Number(r.cash_on_tour || 0);
+    acc.paidTotal += Number(r.paid_total || 0) || (Number(r.paid_to_agency || 0) + Number(r.cash_on_tour || 0));
     acc.sale += Number(r.total_sale || 0);
     acc.net += Number(r.total_net || 0);
     acc.profit += Number(r.profit || 0);
@@ -1308,7 +1309,7 @@ const AccountingDetailTable: React.FC<{ rows: any[]; onConfirmToggle: () => void
     acc.profitAg += Number(r.profit_after_agent || 0);
     acc.managerPay += Number(r.manager_pay || 0);
     return acc;
-  }, { adults: 0, children: 0, paid: 0, cash: 0, sale: 0, net: 0, profit: 0, agentComm: 0, profitAg: 0, managerPay: 0 });
+  }, { adults: 0, children: 0, paid: 0, cash: 0, paidTotal: 0, sale: 0, net: 0, profit: 0, agentComm: 0, profitAg: 0, managerPay: 0 });
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
@@ -1326,8 +1327,8 @@ const AccountingDetailTable: React.FC<{ rows: any[]; onConfirmToggle: () => void
             <th className={thCls + ' text-right'}>Дет</th>
             <th className={thCls + ' text-right'}>Мл</th>
             <th className={thCls}>Ваучер №</th>
-            <th className={thCls + ' text-right'}>Оплачено</th>
-            <th className={thCls + ' text-right'}>Cash on tour</th>
+            <th className={thCls + ' text-right'}>Оплачено (итого)</th>
+            <th className={thCls + ' text-right'}>Депозит в компанию</th>
             <th className={thCls + ' text-right'}>Sale</th>
             <th className={thCls + ' text-right'}>Нетто</th>
             <th className={thCls + ' text-right'}>Профит</th>
@@ -1361,8 +1362,8 @@ const AccountingDetailTable: React.FC<{ rows: any[]; onConfirmToggle: () => void
                 <td className={tdR}>{r.children}</td>
                 <td className={tdR}>{r.infants}</td>
                 <td className={tdCls + ' font-medium text-blue-700'}>{r.voucher_number || '—'}</td>
-                <td className={tdR + ' ' + paidCls}>{fB(Number(r.paid_to_agency || 0))}</td>
-                <td className={tdR}>{fB(Number(r.cash_on_tour || 0))}</td>
+                <td className={tdR + ' ' + paidCls}>{fB(Number(r.paid_total || 0) || (Number(r.paid_to_agency || 0) + Number(r.cash_on_tour || 0)))}</td>
+                <td className={tdR + (Number(r.cash_on_tour) > 0 ? ' text-amber-600 font-semibold' : '')}>{Number(r.cash_on_tour) > 0 ? `+${fB(Number(r.cash_on_tour))}` : '—'}</td>
                 <td className={tdR + ' font-medium'}>{fB(Number(r.total_sale || 0))}</td>
                 <td className={tdR}>{fB(Number(r.total_net || 0))}</td>
                 <td className={tdR + ' font-semibold ' + (Number(r.profit) >= 0 ? 'text-green-700' : 'text-red-600')}>{fB(Number(r.profit || 0))}</td>
@@ -1410,8 +1411,8 @@ const AccountingDetailTable: React.FC<{ rows: any[]; onConfirmToggle: () => void
             <td className={tdR}>{totals.adults}</td>
             <td className={tdR}>{totals.children}</td>
             <td colSpan={2} />
-            <td className={tdR}>{fB(totals.paid)}</td>
-            <td className={tdR}>{fB(totals.cash)}</td>
+            <td className={tdR}>{fB(totals.paidTotal)}</td>
+            <td className={tdR + ' text-amber-600'}>{fB(totals.cash)}</td>
             <td className={tdR}>{fB(totals.sale)}</td>
             <td className={tdR}>{fB(totals.net)}</td>
             <td className={tdR}>{fB(totals.profit)}</td>
