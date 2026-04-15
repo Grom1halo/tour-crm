@@ -8,7 +8,7 @@ const api = axios.create({
 });
 
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token');
+  const token = localStorage.getItem('token') || sessionStorage.getItem('token');
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
@@ -19,6 +19,8 @@ api.interceptors.response.use(
     if (error.response?.status === 401) {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
+      sessionStorage.removeItem('token');
+      sessionStorage.removeItem('user');
       window.location.href = '/login';
     }
     return Promise.reject(error);
@@ -26,7 +28,7 @@ api.interceptors.response.use(
 );
 
 // Auth
-export const login = (username: string, password: string) => api.post('/auth/login', { username, password });
+export const login = (username: string, password: string, rememberMe?: boolean) => api.post('/auth/login', { username, password, rememberMe });
 export const getCurrentUser = () => api.get('/auth/me');
 
 // Users
@@ -50,6 +52,7 @@ export const updateVoucher = (id: number, data: any) => api.put(`/vouchers/${id}
 export const deleteVoucher = (id: number) => api.delete(`/vouchers/${id}`);
 export const restoreVoucher = (id: number) => api.post(`/vouchers/${id}/restore`);
 export const copyVoucher = (id: number) => api.post(`/vouchers/${id}/copy`);
+export const toggleServed = (id: number) => api.patch(`/vouchers/${id}/served`);
 export const getTourPrices = (tourId: number, companyId: number, date: string) =>
   api.get('/vouchers/prices/lookup', { params: { tourId, companyId, date } });
 export const getToursByCompany = (companyId: number) =>
@@ -97,5 +100,32 @@ export const getSeasons = () => api.get('/seasons');
 export const createSeason = (data: any) => api.post('/seasons', data);
 export const updateSeason = (id: number, data: any) => api.put(`/seasons/${id}`, data);
 export const deleteSeason = (id: number) => api.delete(`/seasons/${id}`);
+
+// Accounting
+export const getAccountingDashboard = () => api.get('/accounting/dashboard');
+export const getAccountingCashflow = (params?: any) => api.get('/accounting/cashflow', { params });
+export const addAccountingEntry = (data: any) => api.post('/accounting/cashflow', data);
+export const updateAccountingEntry = (id: number, data: any) => api.put(`/accounting/cashflow/${id}`, data);
+export const deleteAccountingEntry = (id: number) => api.delete(`/accounting/cashflow/${id}`);
+export const getOperatorReconciliation = (params?: any) => api.get('/accounting/operators', { params });
+export const payOperatorVouchers = (data: any) => api.post('/accounting/operators/pay', data);
+export const writeOffOperatorDebt = (data: any) => api.post('/accounting/operators/writeoff', data);
+export const getEmployeeData = (params?: any) => api.get('/accounting/employees', { params });
+export const addEmployeePayment = (data: any) => api.post('/accounting/employee-payments', data);
+export const updateEmployeePayment = (id: number, data: any) => api.put(`/accounting/employee-payments/${id}`, data);
+export const deleteEmployeePayment = (id: number) => api.delete(`/accounting/employee-payments/${id}`);
+export const updateEmployeeSalary = (id: number, baseSalary: number) => api.put(`/accounting/employees/${id}/salary`, { baseSalary });
+export const updateEmployeeSalaryPct = (id: number, commissionPercentage: number) => api.put(`/accounting/employees/${id}/salary`, { commissionPercentage });
+
+// Voucher confirmation (for accountants)
+export const confirmVoucher = (id: number, field: string) => api.patch(`/vouchers/${id}/confirm`, { field });
+
+// Statistics
+export const getMonthlyStats = (year?: number) => api.get('/statistics/monthly', { params: { year } });
+export const getSeasonStats = () => api.get('/statistics/seasons');
+export const getAllTimeStats    = () => api.get('/statistics/all-time');
+export const getStatsByTour    = (year?: number) => api.get('/statistics/by-tour',    { params: year ? { year } : {} });
+export const getStatsByCompany = (year?: number) => api.get('/statistics/by-company', { params: year ? { year } : {} });
+export const getStatsByClient  = (year?: number) => api.get('/statistics/by-client',  { params: year ? { year } : {} });
 
 export default api;

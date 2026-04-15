@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import * as api from '../api';
 import { useAuth } from '../contexts/AuthContext';
 import { useLanguage } from '../i18n/LanguageContext';
@@ -27,12 +28,9 @@ const ReportsPage: React.FC = () => {
   const [payments, setPayments] = useState<any[]>([]);
   const [detail, setDetail] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
-  const [exportDateFrom, setExportDateFrom] = useState(() => {
-    const d = new Date(); d.setDate(1); return d.toISOString().split('T')[0];
-  });
-  const [exportDateTo, setExportDateTo] = useState(() => new Date().toISOString().split('T')[0]);
   const [exporting, setExporting] = useState(false);
   const [dateType, setDateType] = useState<'sale' | 'tour'>('sale');
+  const [currencyFilter, setCurrencyFilter] = useState('');
 
   useEffect(() => {
     if (isAdminOrAccountant) {
@@ -44,12 +42,12 @@ const ReportsPage: React.FC = () => {
 
   useEffect(() => {
     loadReport();
-  }, [tab, groupBy, managerId, dateFrom, dateTo, dateType]);
+  }, [tab, groupBy, managerId, dateFrom, dateTo, dateType, currencyFilter]);
 
   const loadReport = async () => {
     setLoading(true);
     try {
-      const params = { dateFrom, dateTo, managerId: managerId || undefined, dateType };
+      const params = { dateFrom, dateTo, managerId: managerId || undefined, dateType, currency: currencyFilter || undefined };
       const [totalsRes] = await Promise.all([api.getReportTotals(params)]);
       setTotals(totalsRes.data);
 
@@ -74,9 +72,9 @@ const ReportsPage: React.FC = () => {
     setExporting(true);
     try {
       const token = localStorage.getItem('token');
-      const params = new URLSearchParams({ dateFrom: exportDateFrom, dateTo: exportDateTo });
+      const params = new URLSearchParams({ dateFrom, dateTo, dateType });
       if (managerId) params.append('managerId', managerId);
-      const res = await fetch(`/api/reports/export/daily?${params}`, {
+      const res = await fetch(`/api/reports/export/full?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error('Export failed');
@@ -84,7 +82,7 @@ const ReportsPage: React.FC = () => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `accounting_${exportDateFrom}_${exportDateTo}.xlsx`;
+      a.download = `report_${dateFrom}_${dateTo}.xlsx`;
       a.click();
       URL.revokeObjectURL(url);
     } catch {
@@ -92,43 +90,6 @@ const ReportsPage: React.FC = () => {
     } finally {
       setExporting(false);
     }
-  };
-
-  const handleManagerExport = async () => {
-    setExporting(true);
-    try {
-      const token = localStorage.getItem('token');
-      const params = new URLSearchParams({ dateFrom: exportDateFrom, dateTo: exportDateTo });
-      if (managerId) params.append('managerId', managerId);
-      const res = await fetch(`/api/reports/export/manager?${params}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error('Export failed');
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `manager_${exportDateFrom}_${exportDateTo}.xlsx`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch {
-      alert('Ошибка экспорта');
-    } finally {
-      setExporting(false);
-    }
-  };
-
-  const handleHtmlReport = () => {
-    const token = localStorage.getItem('token');
-    const params = new URLSearchParams({ dateFrom: exportDateFrom, dateTo: exportDateTo });
-    if (managerId) params.append('managerId', managerId);
-    // Open HTML report in new tab with token in header (via fetch + blob URL)
-    fetch(`/api/reports/export/html?${params}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    }).then(r => r.blob()).then(blob => {
-      const url = URL.createObjectURL(blob);
-      window.open(url, '_blank');
-    });
   };
 
   const fmt = (v: any) => v ? `฿${Number(v).toLocaleString('ru', { minimumFractionDigits: 0 })}` : '฿0';
@@ -150,51 +111,14 @@ const ReportsPage: React.FC = () => {
 
         {/* Export block */}
         {(isAdminOrAccountant || isManagerOnly) && (
-        <div className="flex items-center gap-2 bg-white rounded-lg shadow-sm px-4 py-2 border border-green-200">
-          <span className="text-sm text-gray-600 font-medium">{isManagerOnly ? 'Экспорт' : t.reportsDailyAccounting}</span>
           <button
-            onClick={() => { const d = new Date().toISOString().split('T')[0]; setExportDateFrom(d); setExportDateTo(d); }}
-            className="px-2 py-1 bg-gray-100 text-gray-600 rounded text-xs hover:bg-gray-200 whitespace-nowrap"
-            title="Сегодня"
-          >Сегодня</button>
-          <input
-            type="date"
-            value={exportDateFrom}
-            onChange={e => setExportDateFrom(e.target.value)}
-            className="px-2 py-1 border border-gray-300 rounded text-sm outline-none focus:ring-2 focus:ring-green-500"
-          />
-          <span className="text-gray-400 text-sm">—</span>
-          <input
-            type="date"
-            value={exportDateTo}
-            onChange={e => setExportDateTo(e.target.value)}
-            className="px-2 py-1 border border-gray-300 rounded text-sm outline-none focus:ring-2 focus:ring-green-500"
-          />
-          {isAdminOrAccountant && (
-            <button
-              onClick={handleExport}
-              disabled={exporting}
-              className="flex items-center gap-2 px-4 py-1.5 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 transition disabled:opacity-50"
-            >
-              {exporting ? t.reportsExporting : t.reportsExportBtn}
-            </button>
-          )}
-          <button
-            onClick={handleManagerExport}
+            onClick={handleExport}
             disabled={exporting}
-            className="flex items-center gap-2 px-4 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 transition disabled:opacity-50"
+            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 transition disabled:opacity-50 whitespace-nowrap"
+            title={`Экспорт отчёта за ${dateFrom} – ${dateTo}`}
           >
-            Менеджер XLS
+            {exporting ? '⏳ Формирую...' : '⬇ Экспорт XLS'}
           </button>
-          {isAdminOrAccountant && (
-            <button
-              onClick={handleHtmlReport}
-              className="flex items-center gap-2 px-4 py-1.5 bg-purple-600 text-white rounded-lg text-sm font-semibold hover:bg-purple-700 transition"
-            >
-              HTML
-            </button>
-          )}
-        </div>
         )}
       </div>
 
@@ -223,6 +147,14 @@ const ReportsPage: React.FC = () => {
             <div className="flex rounded-lg border border-gray-300 overflow-hidden text-sm">
               <button onClick={() => setDateType('sale')} className={`px-3 py-2 ${dateType === 'sale' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>По продаже</button>
               <button onClick={() => setDateType('tour')} className={`px-3 py-2 ${dateType === 'tour' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>По выезду</button>
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Регион</label>
+            <div className="flex rounded-lg border border-gray-300 overflow-hidden text-sm">
+              <button onClick={() => setCurrencyFilter('')} className={`px-3 py-2 ${currencyFilter === '' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>Все</button>
+              <button onClick={() => setCurrencyFilter('THB')} className={`px-3 py-2 ${currencyFilter === 'THB' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>🇹🇭 Тай</button>
+              <button onClick={() => setCurrencyFilter('VND')} className={`px-3 py-2 ${currencyFilter === 'VND' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>🇻🇳 Вьетнам</button>
             </div>
           </div>
           <button onClick={loadReport} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">
@@ -300,6 +232,7 @@ const ReportsPage: React.FC = () => {
                   { key: 'manager_name', label: t.sumManager },
                   { key: 'tour_name', label: t.sumTour },
                   { key: 'voucher_count', label: t.sumVouchers, num: true },
+                  { key: 'voucher_numbers', label: 'Ваучеры', vouchers: true },
                   { key: 'total_sale', label: t.sumSale, money: true },
                   { key: 'total_net', label: t.sumNet, money: true },
                   { key: 'profit', label: t.sumProfit, money: true, highlight: true },
@@ -317,6 +250,7 @@ const ReportsPage: React.FC = () => {
                   { key: 'company_name', label: t.sumCompany },
                   { key: 'tour_name', label: t.sumTour },
                   { key: 'voucher_count', label: t.sumVouchers, num: true },
+                  { key: 'voucher_numbers', label: 'Ваучеры', vouchers: true },
                   { key: 'total_pax', label: t.sumPax, num: true },
                   { key: 'total_sale', label: t.sumSale, money: true },
                   { key: 'total_net', label: t.sumNet, money: true },
@@ -327,6 +261,7 @@ const ReportsPage: React.FC = () => {
                   { key: 'tour_name', label: t.sumTour },
                   { key: 'tour_type', label: t.sumTourType },
                   { key: 'voucher_count', label: t.sumVouchers, num: true },
+                  { key: 'voucher_numbers', label: 'Ваучеры', vouchers: true },
                   { key: 'total_pax', label: t.sumPax, num: true },
                   { key: 'total_sale', label: t.sumSale, money: true },
                   { key: 'profit', label: t.sumProfit, money: true, highlight: true },
@@ -335,6 +270,7 @@ const ReportsPage: React.FC = () => {
                 <SummaryTable rows={rows} total={t.reportsTotal} columns={[
                   { key: 'date', label: t.sumDate, date: true },
                   { key: 'voucher_count', label: t.sumVouchers, num: true },
+                  { key: 'voucher_numbers', label: 'Ваучеры', vouchers: true },
                   { key: 'total_pax', label: t.sumPax, num: true },
                   { key: 'total_sale', label: t.sumSale, money: true },
                   { key: 'total_net', label: t.sumNet, money: true },
@@ -355,7 +291,7 @@ const ReportsPage: React.FC = () => {
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50">
                     <tr>
-                      {[t.payDate, t.payVoucher, t.payTourDate, t.payClient, t.payPhone, t.payManager, t.payAmount, t.payCurrency, t.payMethod, t.payNotes].map(h => (
+                      {[t.payDate, t.payVoucher, t.payTourDate, t.payManager, t.payAmount, t.payCurrency, t.payMethod, t.payNotes].map(h => (
                         <th key={h} className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase">{h}</th>
                       ))}
                     </tr>
@@ -366,8 +302,6 @@ const ReportsPage: React.FC = () => {
                         <td className="px-3 py-2 whitespace-nowrap">{p.payment_date ? new Date(p.payment_date).toLocaleDateString('ru') : '—'}</td>
                         <td className="px-3 py-2 text-blue-600 font-medium">{p.voucher_number}</td>
                         <td className="px-3 py-2 whitespace-nowrap">{p.tour_date ? new Date(p.tour_date).toLocaleDateString('ru') : '—'}</td>
-                        <td className="px-3 py-2">{p.client_name}</td>
-                        <td className="px-3 py-2 text-gray-500">{p.client_phone}</td>
                         <td className="px-3 py-2 text-gray-500">{p.manager_name}</td>
                         <td className="px-3 py-2 font-medium text-right">฿{Number(p.amount).toFixed(0)}</td>
                         <td className="px-3 py-2">{p.currency || 'THB'}</td>
@@ -378,7 +312,7 @@ const ReportsPage: React.FC = () => {
                   </tbody>
                   <tfoot className="bg-gray-50 font-semibold">
                     <tr>
-                      <td colSpan={6} className="px-3 py-2 text-right text-xs">{t.payTotalLabel}</td>
+                      <td colSpan={4} className="px-3 py-2 text-right text-xs">{t.payTotalLabel}</td>
                       <td className="px-3 py-2 text-right">
                         ฿{payments.reduce((s, p) => s + Number(p.amount || 0), 0).toLocaleString('ru', { minimumFractionDigits: 0 })}
                       </td>
@@ -481,6 +415,7 @@ const DetailTable: React.FC<{ rows: any[]; isAdminOrAccountant: boolean }> = ({ 
           <tr>
             <th className={thCls}>Дата создания</th>
             <th className={thCls}>Дата выезда</th>
+            <th className={thCls}>Ваучер</th>
             <th className={thCls}>Время</th>
             <th className={thCls}>Компания</th>
             <th className={thCls}>Тур</th>
@@ -513,6 +448,11 @@ const DetailTable: React.FC<{ rows: any[]; isAdminOrAccountant: boolean }> = ({ 
               <tr key={r.id} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
                 <td className={tdCls}>{fmtD(r.created_at)}</td>
                 <td className={tdCls}>{fmtD(r.tour_date)}</td>
+                <td className={tdCls + ' font-medium'}>
+                  <Link to={`/vouchers/${r.id}`} className="text-blue-600 hover:underline">
+                    {r.voucher_number || '—'}
+                  </Link>
+                </td>
                 <td className={tdCls}>{r.tour_time || '—'}</td>
                 <td className={tdCls}>{r.company_name || '—'}</td>
                 <td className={tdCls + ' max-w-[150px] truncate'} title={r.tour_name}>{r.tour_name || '—'}</td>
@@ -542,7 +482,7 @@ const DetailTable: React.FC<{ rows: any[]; isAdminOrAccountant: boolean }> = ({ 
         </tbody>
         <tfoot className="bg-gray-100 font-semibold text-xs border-t-2 border-gray-300">
           <tr>
-            <td colSpan={9} className="px-2 py-2 text-gray-600">Итого ({rows.length})</td>
+            <td colSpan={10} className="px-2 py-2 text-gray-600">Итого ({rows.length})</td>
             <td className={tdR}>{fmtB(rows.reduce((s, r) => s + Number(r.paid_to_agency || 0), 0))}</td>
             <td className={tdR}>{fmtB(rows.reduce((s, r) => s + Number(r.cash_on_tour || 0), 0))}</td>
             <td className={tdR}>{fmtB(rows.reduce((s, r) => s + Number(r.total_sale || 0), 0))}</td>
@@ -562,7 +502,7 @@ const DetailTable: React.FC<{ rows: any[]; isAdminOrAccountant: boolean }> = ({ 
   );
 };
 
-type ColDef = { key: string; label: string; money?: boolean; num?: boolean; highlight?: boolean; date?: boolean };
+type ColDef = { key: string; label: string; money?: boolean; num?: boolean; highlight?: boolean; date?: boolean; vouchers?: boolean };
 
 const SummaryTable: React.FC<{ rows: any[]; columns: ColDef[]; total: string }> = ({ rows, columns, total }) => (
   <div className="overflow-x-auto">
@@ -585,6 +525,8 @@ const SummaryTable: React.FC<{ rows: any[]; columns: ColDef[]; total: string }> 
                   ? `฿${Number(row[c.key] || 0).toLocaleString('ru', { minimumFractionDigits: 0 })}`
                   : c.date
                   ? (row[c.key] ? new Date(row[c.key]).toLocaleDateString('ru') : '—')
+                  : c.vouchers
+                  ? <span className="text-blue-600 font-mono text-xs" title={row[c.key] || ''}>{row[c.key] || '—'}</span>
                   : row[c.key] ?? '—'}
               </td>
             ))}

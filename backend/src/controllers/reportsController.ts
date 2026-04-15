@@ -5,7 +5,7 @@ import pool from '../config/database';
 // Summary report: revenue by manager, company, tour
 export const getSummaryReport = async (req: AuthRequest, res: Response) => {
   try {
-    const { dateFrom, dateTo, managerId, groupBy = 'manager', dateType = 'sale' } = req.query;
+    const { dateFrom, dateTo, managerId, groupBy = 'manager', dateType = 'sale', currency } = req.query;
     const user = req.user!;
     const dateField = dateType === 'tour' ? 'v.tour_date::date' : 'v.created_at::date';
 
@@ -27,6 +27,7 @@ export const getSummaryReport = async (req: AuthRequest, res: Response) => {
       managerFilter = ` AND v.manager_id = $${p++}`;
       params.push(managerId);
     }
+    if (currency) { managerFilter += ` AND v.currency = $${p++}`; params.push(currency); }
 
     let rows;
 
@@ -35,8 +36,9 @@ export const getSummaryReport = async (req: AuthRequest, res: Response) => {
         `SELECT
           u.id as manager_id,
           u.full_name as manager_name,
-          t.name as tour_name,
+          COALESCE(t.name, v.tour_details) as tour_name,
           COUNT(v.id) as voucher_count,
+          string_agg(v.voucher_number, ', ' ORDER BY v.voucher_number) as voucher_numbers,
           SUM(v.total_sale) as total_sale,
           SUM(v.total_net) as total_net,
           SUM(v.total_sale - v.total_net) as profit,
@@ -67,8 +69,9 @@ export const getSummaryReport = async (req: AuthRequest, res: Response) => {
         `SELECT
           co.id as company_id,
           co.name as company_name,
-          t.name as tour_name,
+          COALESCE(t.name, v.tour_details) as tour_name,
           COUNT(v.id) as voucher_count,
+          string_agg(v.voucher_number, ', ' ORDER BY v.voucher_number) as voucher_numbers,
           SUM(v.total_sale) as total_sale,
           SUM(v.total_net) as total_net,
           SUM(v.total_sale - v.total_net) as profit,
@@ -90,6 +93,7 @@ export const getSummaryReport = async (req: AuthRequest, res: Response) => {
           t.name as tour_name,
           t.tour_type,
           COUNT(v.id) as voucher_count,
+          string_agg(v.voucher_number, ', ' ORDER BY v.voucher_number) as voucher_numbers,
           SUM(v.adults + v.children) as total_pax,
           SUM(v.total_sale) as total_sale,
           SUM(v.total_net) as total_net,
@@ -108,6 +112,7 @@ export const getSummaryReport = async (req: AuthRequest, res: Response) => {
         `SELECT
           ${dateField} as date,
           COUNT(v.id) as voucher_count,
+          string_agg(v.voucher_number, ', ' ORDER BY v.voucher_number) as voucher_numbers,
           SUM(v.adults + v.children) as total_pax,
           SUM(v.total_sale) as total_sale,
           SUM(v.total_net) as total_net,
@@ -141,7 +146,7 @@ export const getSummaryReport = async (req: AuthRequest, res: Response) => {
 // Totals for date range (header cards)
 export const getReportTotals = async (req: AuthRequest, res: Response) => {
   try {
-    const { dateFrom, dateTo, managerId, dateType = 'sale' } = req.query;
+    const { dateFrom, dateTo, managerId, dateType = 'sale', currency } = req.query;
     const user = req.user!;
     const dateField = dateType === 'tour' ? 'v.tour_date::date' : 'v.created_at::date';
 
@@ -160,6 +165,7 @@ export const getReportTotals = async (req: AuthRequest, res: Response) => {
       filters += ` AND v.manager_id = $${p++}`;
       params.push(managerId);
     }
+    if (currency) { filters += ` AND v.currency = $${p++}`; params.push(currency); }
 
     const result = await pool.query(
       `SELECT
@@ -210,7 +216,7 @@ export const getPaymentsReport = async (req: AuthRequest, res: Response) => {
 
     const result = await pool.query(
       `SELECT
-        p.id, p.payment_date, p.amount, p.currency, p.payment_method, p.notes,
+        p.id, p.payment_date, p.amount, v.currency, p.payment_method, p.notes,
         v.voucher_number, v.tour_date,
         c.name as client_name, c.phone as client_phone,
         u.full_name as manager_name,
@@ -236,7 +242,7 @@ export const getPaymentsReport = async (req: AuthRequest, res: Response) => {
 // Detailed per-voucher report
 export const getDetailReport = async (req: AuthRequest, res: Response) => {
   try {
-    const { dateFrom, dateTo, managerId, dateType = 'sale' } = req.query;
+    const { dateFrom, dateTo, managerId, dateType = 'sale', currency } = req.query;
     const user = req.user!;
     const dateField = dateType === 'tour' ? 'v.tour_date::date' : 'v.created_at::date';
 
@@ -255,6 +261,7 @@ export const getDetailReport = async (req: AuthRequest, res: Response) => {
       filters += ` AND v.manager_id = $${p++}`;
       params.push(managerId);
     }
+    if (currency) { filters += ` AND v.currency = $${p++}`; params.push(currency); }
 
     const result = await pool.query(
       `SELECT
@@ -264,7 +271,7 @@ export const getDetailReport = async (req: AuthRequest, res: Response) => {
         v.tour_date,
         v.tour_time,
         co.name AS company_name,
-        t.name AS tour_name,
+        COALESCE(t.name, v.tour_details) AS tour_name,
         v.hotel_name,
         v.room_number,
         v.adults,
@@ -291,6 +298,8 @@ export const getDetailReport = async (req: AuthRequest, res: Response) => {
         v.paid_to_agency,
         v.cash_on_tour,
         v.payment_status,
+        v.agent_manager_confirmed,
+        v.agent_accountant_confirmed,
         (SELECT MAX(p2.payment_date) FROM payments p2 WHERE p2.voucher_id = v.id) AS last_payment_date,
         (SELECT string_agg(DISTINCT p2.payment_method, ', ' ORDER BY p2.payment_method)
           FROM payments p2 WHERE p2.voucher_id = v.id) AS payment_methods,
@@ -305,7 +314,7 @@ export const getDetailReport = async (req: AuthRequest, res: Response) => {
       LEFT JOIN agents ag ON v.agent_id = ag.id
       LEFT JOIN clients cl ON v.client_id = cl.id
       WHERE v.is_deleted = false ${filters}
-      ORDER BY v.created_at DESC
+      ORDER BY v.created_at ASC
       LIMIT 2000`,
       params
     );

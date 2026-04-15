@@ -7,6 +7,8 @@ import * as referenceController from '../controllers/referenceController';
 import * as reportsController from '../controllers/reportsController';
 import * as usersController from '../controllers/usersController';
 import * as exportController from '../controllers/exportController';
+import * as accountingController from '../controllers/accountingController';
+import * as statisticsController from '../controllers/statisticsController';
 import { authenticate, authorize } from '../middleware/auth';
 
 const router = Router();
@@ -39,6 +41,8 @@ router.put('/vouchers/:id', authenticate, authorize('manager', 'admin'), voucher
 router.delete('/vouchers/:id', authenticate, authorize('manager', 'admin'), voucherController.deleteVoucher);
 router.post('/vouchers/:id/restore', authenticate, authorize('manager', 'admin'), voucherController.restoreVoucher);
 router.post('/vouchers/:id/copy', authenticate, authorize('manager', 'admin'), voucherController.copyVoucher);
+router.patch('/vouchers/:id/served', authenticate, authorize('manager', 'admin'), voucherController.toggleServed);
+router.patch('/vouchers/:id/confirm', authenticate, authorize('admin', 'accountant'), voucherController.confirmVoucher);
 
 // ===== PAYMENTS =====
 router.post('/payments', authenticate, authorize('manager', 'admin', 'accountant'), paymentController.addPayment);
@@ -54,6 +58,8 @@ router.get('/reports/export/daily', authenticate, exportController.exportDailyAc
 router.get('/reports/export/manager', authenticate, exportController.exportManagerReport);
 router.get('/reports/export/hotline', authenticate, exportController.exportHotlineReport);
 router.get('/reports/export/html', authenticate, exportController.exportHtmlReport);
+router.get('/reports/export/full', authenticate, exportController.exportFullReport);
+router.get('/reports/export/accounting', authenticate, authorize('admin', 'accountant'), exportController.exportAccountingReport);
 
 // ===== REFERENCE DATA =====
 router.get('/companies', authenticate, referenceController.getCompanies);
@@ -62,7 +68,7 @@ router.put('/companies/:id', authenticate, authorize('admin', 'editor'), referen
 router.delete('/companies/:id', authenticate, authorize('admin', 'editor'), referenceController.deleteCompany);
 
 router.get('/tours', authenticate, referenceController.getTours);
-router.post('/tours', authenticate, authorize('admin', 'editor'), referenceController.createTour);
+router.post('/tours', authenticate, authorize('admin', 'editor', 'manager'), referenceController.createTour);
 router.put('/tours/:id', authenticate, authorize('admin', 'editor'), referenceController.updateTour);
 router.delete('/tours/:id', authenticate, authorize('admin', 'editor'), referenceController.deleteTour);
 
@@ -80,5 +86,28 @@ router.get('/seasons', authenticate, referenceController.getSeasons);
 router.post('/seasons', authenticate, authorize('admin'), referenceController.createSeason);
 router.put('/seasons/:id', authenticate, authorize('admin'), referenceController.updateSeason);
 router.delete('/seasons/:id', authenticate, authorize('admin'), referenceController.deleteSeason);
+
+// ===== STATISTICS =====
+router.get('/statistics/monthly', authenticate, authorize('admin', 'accountant'), statisticsController.getMonthlyStats);
+router.get('/statistics/seasons', authenticate, authorize('admin', 'accountant'), statisticsController.getSeasonStats);
+router.get('/statistics/all-time', authenticate, authorize('admin', 'accountant'), statisticsController.getAllTimeStats);
+router.get('/statistics/by-tour', authenticate, authorize('admin', 'accountant'), statisticsController.getStatsByTour);
+router.get('/statistics/by-company', authenticate, authorize('admin', 'accountant'), statisticsController.getStatsByCompany);
+router.get('/statistics/by-client', authenticate, authorize('admin', 'accountant'), statisticsController.getStatsByClient);
+
+// ===== ACCOUNTING =====
+router.get('/accounting/dashboard', authenticate, authorize('admin', 'accountant'), accountingController.getAccountingDashboard);
+router.get('/accounting/cashflow', authenticate, authorize('admin', 'accountant'), accountingController.getCashflow);
+router.post('/accounting/cashflow', authenticate, authorize('admin', 'accountant'), accountingController.addCashflowEntry);
+router.put('/accounting/cashflow/:id', authenticate, authorize('admin', 'accountant'), accountingController.updateCashflowEntry);
+router.delete('/accounting/cashflow/:id', authenticate, authorize('admin', 'accountant'), accountingController.deleteCashflowEntry);
+router.get('/accounting/operators', authenticate, authorize('admin', 'accountant'), accountingController.getOperatorReconciliation);
+router.post('/accounting/operators/pay', authenticate, authorize('admin', 'accountant'), accountingController.payOperatorVouchers);
+router.post('/accounting/operators/writeoff', authenticate, authorize('admin', 'accountant'), accountingController.writeOffOperatorDebt);
+router.get('/accounting/employees', authenticate, authorize('admin', 'accountant'), accountingController.getEmployeeData);
+router.post('/accounting/employee-payments', authenticate, authorize('admin', 'accountant'), accountingController.addEmployeePayment);
+router.put('/accounting/employee-payments/:id', authenticate, authorize('admin', 'accountant'), accountingController.updateEmployeePayment);
+router.delete('/accounting/employee-payments/:id', authenticate, authorize('admin', 'accountant'), accountingController.deleteEmployeePayment);
+router.put('/accounting/employees/:id/salary', authenticate, authorize('admin', 'accountant'), accountingController.updateEmployeeSalary);
 
 export default router;

@@ -4,6 +4,7 @@ import * as api from '../api';
 import { format } from 'date-fns';
 import { useLanguage } from '../i18n/LanguageContext';
 import VoucherGenerator from '../components/VoucherGenerator';
+import { PAYMENT_METHODS } from '../constants/paymentMethods';
 
 const VoucherDetailPage: React.FC = () => {
   const { id } = useParams();
@@ -13,10 +14,13 @@ const VoucherDetailPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [showGenerator, setShowGenerator] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [isRefund, setIsRefund] = useState(false);
+  const [showCashModal, setShowCashModal] = useState(false);
+  const [cashForm, setCashForm] = useState({ paymentDate: new Date().toISOString().split('T')[0], paymentMethod: 'Наличные офис', notes: '' });
   const [paymentForm, setPaymentForm] = useState({
     paymentDate: new Date().toISOString().split('T')[0],
     amount: '',
-    paymentMethod: 'Оплата в офисе',
+    paymentMethod: 'Наличные офис',
     notes: '',
   });
 
@@ -46,12 +50,14 @@ const VoucherDetailPage: React.FC = () => {
         amount: Number(paymentForm.amount),
         paymentMethod: paymentForm.paymentMethod,
         notes: paymentForm.notes,
+        isRefund,
       });
       setShowPaymentModal(false);
+      setIsRefund(false);
       setPaymentForm({
         paymentDate: new Date().toISOString().split('T')[0],
         amount: '',
-        paymentMethod: 'Оплата в офисе',
+        paymentMethod: 'Наличные офис',
         notes: '',
       });
       loadVoucher();
@@ -67,6 +73,25 @@ const VoucherDetailPage: React.FC = () => {
       loadVoucher();
     } catch (error) {
       alert('Failed to delete payment');
+    }
+  };
+
+  const handleCashOnTour = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      await api.addAccountingEntry({
+        entryDate: cashForm.paymentDate,
+        entryType: 'income',
+        paymentMethod: cashForm.paymentMethod,
+        amount: voucher.cash_on_tour,
+        companyId: voucher.company_id || null,
+        category: 'Кэш с тура',
+        notes: `Ваучер #${voucher.voucher_number}${cashForm.notes ? ` — ${cashForm.notes}` : ''}`,
+      });
+      setShowCashModal(false);
+      alert('Кэш зачислен в Движение средств');
+    } catch {
+      alert('Ошибка зачисления');
     }
   };
 
@@ -104,16 +129,6 @@ const VoucherDetailPage: React.FC = () => {
     );
   }
 
-  const paymentMethods = [
-    'Оплата в офисе',
-    'Оплата курьеру',
-    'Обменник',
-    'ИП',
-    'Usdt обменник',
-    'Наличные на туре',
-    'Тайский счёт',
-    'В компанию',
-  ];
 
   return (
     <div className="max-w-5xl mx-auto">
@@ -196,7 +211,7 @@ const VoucherDetailPage: React.FC = () => {
               <div>
                 <div className="text-gray-500 mb-1">{t.detailTourDate}</div>
                 <div className="font-semibold text-gray-800">
-                  {format(new Date(voucher.tour_date), 'dd/MM/yyyy')}
+                  {format(new Date(voucher.tour_date.slice(0,10) + 'T12:00:00'), 'dd/MM/yyyy')}
                   {voucher.tour_time && ` ${voucher.tour_time}`}
                 </div>
               </div>
@@ -214,6 +229,12 @@ const VoucherDetailPage: React.FC = () => {
                 <div>
                   <div className="text-gray-500 mb-1">{t.detailRoomNumber}</div>
                   <div className="font-semibold text-gray-800">{voucher.room_number}</div>
+                </div>
+              )}
+              {voucher.hotline_phone && (
+                <div>
+                  <div className="text-gray-500 mb-1">Хотлайн</div>
+                  <div className="font-semibold text-gray-800">{voucher.hotline_phone}</div>
                 </div>
               )}
             </div>
@@ -260,21 +281,32 @@ const VoucherDetailPage: React.FC = () => {
           <div className="bg-white rounded-lg shadow-sm p-6">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-xl font-bold text-gray-800">{t.detailPayments}</h2>
-              <button
-                onClick={() => setShowPaymentModal(true)}
-                className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 transition"
-              >
-                {t.detailAddPayment}
-              </button>
+              <div className="flex gap-2">
+                {voucher.cash_on_tour > 0 && (
+                  <button
+                    onClick={() => setShowCashModal(true)}
+                    className="px-3 py-2 bg-amber-500 text-white rounded-lg text-sm font-semibold hover:bg-amber-600 transition"
+                    title="Зачислить кэш с тура в Движение средств"
+                  >
+                    💵 Кэш с тура ({Number(voucher.cash_on_tour).toLocaleString('ru-RU')} ฿)
+                  </button>
+                )}
+                <button
+                  onClick={() => setShowPaymentModal(true)}
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 transition"
+                >
+                  {t.detailAddPayment}
+                </button>
+              </div>
             </div>
 
             {voucher.payments && voucher.payments.length > 0 ? (
               <div className="space-y-3">
                 {voucher.payments.map((payment: any) => (
-                  <div key={payment.id} className="flex justify-between items-center bg-gray-50 rounded-lg p-4">
+                  <div key={payment.id} className={`flex justify-between items-center rounded-lg p-4 ${payment.is_refund ? 'bg-red-50 border border-red-200' : 'bg-gray-50'}`}>
                     <div>
-                      <div className="font-semibold text-gray-800">
-                        ฿{Number(payment.amount).toFixed(2)}
+                      <div className={`font-semibold ${payment.is_refund ? 'text-red-700' : 'text-gray-800'}`}>
+                        {payment.is_refund ? '↩ Возврат: ' : ''}฿{Number(payment.amount).toLocaleString('ru-RU', { minimumFractionDigits: 0 })}
                       </div>
                       <div className="text-sm text-gray-600">
                         {payment.payment_method}
@@ -342,11 +374,67 @@ const VoucherDetailPage: React.FC = () => {
         <VoucherGenerator voucher={voucher} onClose={() => setShowGenerator(false)} />
       )}
 
+      {/* Cash on Tour Modal */}
+      {showCashModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-sm">
+            <h2 className="text-lg font-bold text-gray-800 mb-1">Зачислить кэш с тура</h2>
+            <p className="text-sm text-gray-500 mb-4">
+              Сумма: <strong>{Number(voucher.cash_on_tour).toLocaleString('ru-RU')} ฿</strong> будет добавлена как приход в «Движение средств»
+            </p>
+            <form onSubmit={handleCashOnTour} className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Дата</label>
+                <input type="date" value={cashForm.paymentDate}
+                  onChange={e => setCashForm(p => ({ ...p, paymentDate: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Метод получения</label>
+                <select value={cashForm.paymentMethod}
+                  onChange={e => setCashForm(p => ({ ...p, paymentMethod: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500">
+                  {PAYMENT_METHODS.filter(m => m !== 'Депозит в компанию').map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Примечание</label>
+                <input type="text" value={cashForm.notes} placeholder="Необязательно"
+                  onChange={e => setCashForm(p => ({ ...p, notes: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div className="flex gap-2 pt-2">
+                <button type="button" onClick={() => setShowCashModal(false)}
+                  className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm hover:bg-gray-200">Отмена</button>
+                <button type="submit"
+                  className="flex-1 px-4 py-2 bg-amber-500 text-white rounded-lg text-sm font-semibold hover:bg-amber-600">Зачислить</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Add Payment Modal */}
       {showPaymentModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 w-full max-w-md">
-            <h2 className="text-2xl font-bold text-gray-800 mb-4">{t.detailAddPaymentTitle}</h2>
+            <h2 className="text-2xl font-bold text-gray-800 mb-4">{isRefund ? 'Добавить возврат' : t.detailAddPaymentTitle}</h2>
+            {/* Тип: оплата / возврат */}
+            <div className="flex gap-2 mb-4">
+              <button type="button"
+                onClick={() => setIsRefund(false)}
+                className={`flex-1 py-2 rounded-lg text-sm font-medium transition ${!isRefund ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+              >+ Оплата</button>
+              <button type="button"
+                onClick={() => setIsRefund(true)}
+                className={`flex-1 py-2 rounded-lg text-sm font-medium transition ${isRefund ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+              >↩ Возврат</button>
+            </div>
+            {isRefund && (
+              <div className="mb-4 bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-sm text-red-700">
+                Сумма возврата клиенту. Уменьшит оплаченную сумму по ваучеру.
+              </div>
+            )}
             <form onSubmit={handleAddPayment} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">{t.detailPaymentDate}</label>
@@ -359,13 +447,14 @@ const VoucherDetailPage: React.FC = () => {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">{t.detailPaymentAmount}</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">{isRefund ? 'Сумма возврата' : t.detailPaymentAmount}</label>
                 <input
                   type="number"
-                  step="0.01"
+                  step="1"
+                  min="0"
                   value={paymentForm.amount}
                   onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                  className={`w-full px-4 py-2 border rounded-lg focus:ring-2 outline-none ${isRefund ? 'border-red-300 focus:ring-red-400' : 'border-gray-300 focus:ring-blue-500'}`}
                   required
                 />
               </div>
@@ -376,7 +465,7 @@ const VoucherDetailPage: React.FC = () => {
                   onChange={(e) => setPaymentForm({ ...paymentForm, paymentMethod: e.target.value })}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                 >
-                  {paymentMethods.map((method) => (
+                  {PAYMENT_METHODS.filter(m => m !== 'Депозит в компанию' || !isRefund).map((method) => (
                     <option key={method} value={method}>{method}</option>
                   ))}
                 </select>
@@ -387,22 +476,23 @@ const VoucherDetailPage: React.FC = () => {
                   value={paymentForm.notes}
                   onChange={(e) => setPaymentForm({ ...paymentForm, notes: e.target.value })}
                   rows={2}
+                  placeholder={isRefund ? 'Причина возврата...' : ''}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                 />
               </div>
               <div className="flex justify-end space-x-3 pt-4">
                 <button
                   type="button"
-                  onClick={() => setShowPaymentModal(false)}
+                  onClick={() => { setShowPaymentModal(false); setIsRefund(false); }}
                   className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
                 >
                   {t.cancel}
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+                  className={`px-4 py-2 text-white rounded-lg transition ${isRefund ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'}`}
                 >
-                  {t.detailAddPayment}
+                  {isRefund ? 'Сохранить возврат' : t.detailAddPayment}
                 </button>
               </div>
             </form>
