@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import * as api from '../api';
 import { useLanguage } from '../i18n/LanguageContext';
 
@@ -15,6 +16,7 @@ const CANCEL_PRESETS = [
 
 const ToursPage: React.FC = () => {
   const { t } = useLanguage();
+  const [searchParams] = useSearchParams();
   const TOUR_TYPE_LABELS: Record<string, string> = {
     group: t.typeGroup,
     individual: t.typeIndividual,
@@ -26,7 +28,7 @@ const ToursPage: React.FC = () => {
   const [tourPrices, setTourPrices] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
-  const [companyFilter, setCompanyFilter] = useState('');
+  const [companyFilter, setCompanyFilter] = useState(searchParams.get('companyId') || '');
   const [sortKey, setSortKey] = useState<'name' | 'article' | 'tour_type' | 'is_active'>('name');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [showModal, setShowModal] = useState(false);
@@ -46,7 +48,7 @@ const ToursPage: React.FC = () => {
     adultSale: 0, childSale: 0, infantSale: 0, transferSale: 0, otherSale: 0,
   });
 
-  useEffect(() => { load(); loadSeasons(); }, []);
+  useEffect(() => { load(searchParams.get('companyId') || companyFilter); loadSeasons(); }, []);
 
   const loadSeasons = async () => {
     try {
@@ -522,7 +524,14 @@ const ToursPage: React.FC = () => {
       {showPriceModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-            <h2 className="text-lg font-bold mb-4">{editingPrice ? t.toursPriceEditTitle : t.toursPriceNewTitle}</h2>
+            <div className="flex items-baseline justify-between mb-4">
+              <h2 className="text-lg font-bold">{editingPrice ? t.toursPriceEditTitle : t.toursPriceNewTitle}</h2>
+              {editingPrice?.updated_at && (
+                <span className="text-xs text-gray-400">
+                  Изменено: {new Date(editingPrice.updated_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                </span>
+              )}
+            </div>
             <form onSubmit={handlePriceSubmit} className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>

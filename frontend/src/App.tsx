@@ -15,6 +15,8 @@ import ToursPage from './pages/ToursPage';
 import AgentsPage from './pages/AgentsPage';
 import ManagersPage from './pages/ManagersPage';
 import HotlinePage from './pages/HotlinePage';
+import AccountingPage from './pages/AccountingPage';
+import StatisticsPage from './pages/StatisticsPage';
 
 const getDefaultPage = (user: any) => {
   const roles: string[] = user?.roles || [user?.role];
@@ -50,6 +52,8 @@ function App() {
             <Route path="/agents" element={<ProtectedRoute allowedRoles={['admin','manager']}><AgentsPage /></ProtectedRoute>} />
             <Route path="/managers" element={<ProtectedRoute allowedRoles={['admin','accountant']}><ManagersPage /></ProtectedRoute>} />
             <Route path="/hotline" element={<ProtectedRoute allowedRoles={['admin','manager','hotline']}><HotlinePage /></ProtectedRoute>} />
+            <Route path="/accounting" element={<ProtectedRoute allowedRoles={['admin','accountant']}><AccountingPage /></ProtectedRoute>} />
+            <Route path="/statistics" element={<ProtectedRoute allowedRoles={['admin','accountant']}><StatisticsPage /></ProtectedRoute>} />
           </Routes>
         </BrowserRouter>
       </AuthProvider>

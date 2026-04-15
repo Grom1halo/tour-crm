@@ -6,6 +6,7 @@ import { useLanguage } from '../i18n/LanguageContext';
 const LoginPage: React.FC = () => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(true);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
@@ -17,7 +18,7 @@ const LoginPage: React.FC = () => {
     setError('');
     setLoading(true);
     try {
-      await login(username, password);
+      await login(username, password, rememberMe);
       navigate('/');
     } catch (err: any) {
       setError(err.message);
@@ -76,6 +77,16 @@ const LoginPage: React.FC = () => {
               required
             />
           </div>
+
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={rememberMe}
+              onChange={e => setRememberMe(e.target.checked)}
+              className="w-4 h-4 accent-blue-600"
+            />
+            <span className="text-sm text-gray-600">Запомнить устройство на 30 дней</span>
+          </label>
 
           <button
             type="submit"

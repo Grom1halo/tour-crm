@@ -32,22 +32,34 @@ const VoucherGenerator: React.FC<VoucherGeneratorProps> = ({ voucher, onClose })
   }, []);
 
   const isTourflot = voucher.tour_type === 'tourflot';
-  const isVietnam  = /вьетнам|vietnam/i.test(voucher.company_name || '');
+  const isJetskiVoucher = voucher.tour_type === 'jetski';
+  const isVietnam = voucher.tour_type === 'vietnam' || /вьетнам|vietnam/i.test(voucher.company_name || '');
 
   const headerImg = isTourflot
     ? '/voucher-bg/header-tourflot.png'
+    : isJetskiVoucher
+    ? '/voucher-bg/footer-jetski-ru.png'
     : isVietnam
     ? '/voucher-bg/header-vietnam.png'
     : '/voucher-bg/header-phuket.png';
 
   const footerImg = isTourflot
     ? '/voucher-bg/footer-tourflot.png'
+    : isJetskiVoucher
+    ? '/voucher-bg/header-jetski.png'
     : isVietnam
     ? '/voucher-bg/footer-vietnam.png'
     : '/voucher-bg/footer-phuket.png';
 
-  const accentColor = isTourflot ? '#2271b1' : isVietnam ? '#207550' : '#6b3fa0';
+  // accentColor kept for potential future use
+  // const accentColor = isTourflot ? '#2271b1' : isJetskiVoucher ? '#0ea5e9' : isVietnam ? '#207550' : '#6b3fa0';
   const cashColor   = '#e53e3e';
+
+  // Per-jetski passenger config (JSONB array from DB)
+  const jetskiConfig: {adults: number; children: number}[] | null =
+    isJetskiVoucher && Array.isArray(voucher.jetski_config) && voucher.jetski_config.length > 0
+      ? voucher.jetski_config
+      : null;
 
   const companyInfo = isTourflot
     ? { line1: 'Tour Flot Phuket (TFP Phuket Co., Ltd)', line2: '46/23 Moo.9 T.Chalong Muang Phuket 83130', line3: 'Contact: +66 81 968 0544 / +66 85 888 0071', line4: '@tourflot_phuket / www.tourflotphuket.com' }
@@ -56,7 +68,8 @@ const VoucherGenerator: React.FC<VoucherGeneratorProps> = ({ voucher, onClose })
     : { line1: 'Tour Tour Phuket (TFP Phuket Co., Ltd) License 34/02974', offices: ['Patong office: 168 Rat Uthit 200 Pi Road', 'Karon office: 470/4 Patak Road, Karon Subdistrict', 'Chalong office: 46/23 Sunrise Rd, Chalong'], line3: 'Contact: Thai/Eng: +66 81 968 0544, Eng/Rus: +66 85 888 0071', line4: '@tour_tour_phuket  /  www.tourtourphuket.ru' };
 
   const num = (v: any) => Number(v || 0);
-  const fmt = (v: any) => `฿${num(v).toFixed(2)}`;
+  const currencySymbol = voucher.currency === 'VND' ? '₫' : voucher.currency === 'USD' ? '$' : voucher.currency === 'RUB' ? '₽' : '฿';
+  const fmt = (v: any) => `${currencySymbol}${num(v).toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
 
   const adults   = num(voucher.adults);
   const children = num(voucher.children);
@@ -94,8 +107,8 @@ const VoucherGenerator: React.FC<VoucherGeneratorProps> = ({ voucher, onClose })
   };
 
   const S = {
-    label: { fontSize: 11, fontWeight: 600, color: '#888', letterSpacing: 0.8, textTransform: 'uppercase' as const, marginBottom: 4 },
-    value: { fontSize: 17, fontWeight: 700, color: '#1a1a1a' },
+    label: { fontSize: 13, fontWeight: 700, color: '#7B1C1C', letterSpacing: 0.8, textTransform: 'uppercase' as const, marginBottom: 6, backgroundColor: '#f0f0f0', padding: '3px 10px', borderRadius: 4, display: 'block' as const },
+    value: { fontSize: 22, fontWeight: 700, color: '#1a1a1a' },
     divider: { borderTop: '1px solid #eee', margin: '16px 0' },
     section: { marginBottom: 16 },
   };
@@ -138,29 +151,31 @@ const VoucherGenerator: React.FC<VoucherGeneratorProps> = ({ voucher, onClose })
                 </div>
               </div>
             ) : (
-              <div style={{ position: 'relative', overflow: 'hidden', maxHeight: isVietnam ? undefined : 480 }}>
-                <img src={headerImg} alt="header" style={{ width: '100%', display: 'block', marginBottom: isVietnam ? 0 : -54 }} />
-                <div style={{ position: 'absolute', top: '4%', right: '1.5%', textAlign: 'right', maxWidth: '52%' }}>
+              <div style={{ position: 'relative', overflow: 'hidden', maxHeight: (isVietnam || isJetskiVoucher) ? undefined : 480 }}>
+                <img src={headerImg} alt="header" style={{ width: '100%', display: 'block', marginBottom: (isVietnam || isJetskiVoucher) ? 0 : -54 }} />
+                {!isJetskiVoucher && !isVietnam && (
+                <div style={{ position: 'absolute', top: 0, bottom: 0, right: '1.5%', textAlign: 'right', maxWidth: '52%', display: 'flex', flexDirection: 'column', justifyContent: 'space-evenly', padding: '8px 0 20px' }}>
                   {[(companyInfo as any).line1,
                     ...((companyInfo as any).offices || [(companyInfo as any).line2]),
                     (companyInfo as any).line3,
                     (companyInfo as any).line4,
                   ].map((line: string, i: number) => (
-                    <div key={i} style={{ fontSize: 13, fontWeight: 700, color: '#111', lineHeight: 2 }}>{line}</div>
+                    <div key={i} style={{ fontSize: 15, fontWeight: 700, color: '#111', lineHeight: 1.4 }}>{line}</div>
                   ))}
                 </div>
+                )}
               </div>
             )}
 
 
             {/* ── BODY ── */}
-            <div style={{ padding: '2px 32px' }}>
+            <div style={{ padding: '16px 32px 2px' }}>
 
               {/* VOUCHER № | DATE & TIME */}
               <div style={{ display: 'flex', gap: 32, marginBottom: 16 }}>
-                <div style={{ flex: 1, backgroundColor: '#f0f4ff', padding: '12px 16px', borderRadius: 8, borderLeft: '4px solid #1e3a5f' }}>
-                  <div style={S.label}>Voucher №</div>
-                  <div style={{ ...S.value, fontFamily: "'Oswald', sans-serif", fontSize: 22, letterSpacing: 1, color: '#1e3a5f' }}>{voucher.voucher_number}</div>
+                <div style={{ flex: 1, backgroundColor: 'rgba(123, 28, 28, 0.12)', padding: '12px 16px', borderRadius: 8, borderLeft: '4px solid #7B1C1C' }}>
+                  <div style={{ ...S.label, backgroundColor: 'transparent' }}>Voucher №</div>
+                  <div style={{ ...S.value, fontFamily: "'Oswald', sans-serif", fontSize: 26, letterSpacing: 1, color: '#1a1a1a' }}>{voucher.voucher_number}</div>
                 </div>
                 <div style={{ flex: 1 }}>
                   <div style={S.label}>Date &amp; Time</div>
@@ -172,7 +187,7 @@ const VoucherGenerator: React.FC<VoucherGeneratorProps> = ({ voucher, onClose })
               {/* TOUR */}
               <div style={S.section}>
                 <div style={S.label}>Tour</div>
-                <div style={{ ...S.value, fontSize: 22 }}>{voucher.tour_name || '—'}</div>
+                <div style={{ ...S.value, fontSize: 26 }}>{voucher.tour_details || voucher.tour_name || '—'}</div>
               </div>
               <div style={S.divider} />
 
@@ -190,6 +205,38 @@ const VoucherGenerator: React.FC<VoucherGeneratorProps> = ({ voucher, onClose })
               <div style={S.divider} />
 
               {/* TOTAL PASSENGERS | NUMBER OF PASSENGERS */}
+              {isJetskiVoucher && jetskiConfig ? (
+                <>
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ ...S.label, marginBottom: 8 }}>Гидроциклы / Jetskis</div>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+                      <thead>
+                        <tr style={{ backgroundColor: '#f0f4ff' }}>
+                          <th style={{ padding: '6px 12px', textAlign: 'left', fontWeight: 700, color: '#444', borderBottom: '2px solid #dce4f0' }}>#</th>
+                          <th style={{ padding: '6px 12px', textAlign: 'center', fontWeight: 700, color: '#444', borderBottom: '2px solid #dce4f0' }}>Adults / Взрослых</th>
+                          <th style={{ padding: '6px 12px', textAlign: 'center', fontWeight: 700, color: '#444', borderBottom: '2px solid #dce4f0' }}>Children / Детей</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {jetskiConfig.map((jp, idx) => (
+                          <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#fff' : '#f9fafb' }}>
+                            <td style={{ padding: '5px 12px', color: '#666', fontWeight: 600 }}>Jetski {idx + 1}</td>
+                            <td style={{ padding: '5px 12px', textAlign: 'center', fontWeight: 700, color: '#1a1a1a' }}>{jp.adults}</td>
+                            <td style={{ padding: '5px 12px', textAlign: 'center', fontWeight: 700, color: '#1a1a1a' }}>{jp.children}</td>
+                          </tr>
+                        ))}
+                        <tr style={{ backgroundColor: '#f0f4ff', fontWeight: 700 }}>
+                          <td style={{ padding: '6px 12px', color: '#444' }}>Total</td>
+                          <td style={{ padding: '6px 12px', textAlign: 'center', color: '#1e3a5f' }}>{jetskiConfig.reduce((s, p) => s + p.adults, 0)}</td>
+                          <td style={{ padding: '6px 12px', textAlign: 'center', color: '#1e3a5f' }}>{jetskiConfig.reduce((s, p) => s + p.children, 0)}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                  <div style={S.divider} />
+                </>
+              ) : (
+              <>
               <div style={{ display: 'flex', gap: 32, marginBottom: 16 }}>
                 <div style={{ flex: 1 }}>
                   <div style={S.label}>Total Passengers</div>
@@ -200,7 +247,7 @@ const VoucherGenerator: React.FC<VoucherGeneratorProps> = ({ voucher, onClose })
                   <div style={{ display: 'flex', gap: 48 }}>
                     {[['Adults', adults], ['Children', children], ['Infants', infants]].map(([lbl, val]) => (
                       <div key={lbl as string}>
-                        <div style={{ fontSize: 12, color: '#888' }}>{lbl}</div>
+                        <div style={{ fontSize: 13, color: '#888' }}>{lbl}</div>
                         <div style={{ fontSize: 22, fontWeight: 700, color: '#1a1a1a' }}>{val}</div>
                       </div>
                     ))}
@@ -208,6 +255,8 @@ const VoucherGenerator: React.FC<VoucherGeneratorProps> = ({ voucher, onClose })
                 </div>
               </div>
               <div style={S.divider} />
+              </>
+              )}
 
               {/* HOTEL | ROOM */}
               {(voucher.hotel_name || voucher.room_number) && (
@@ -225,6 +274,12 @@ const VoucherGenerator: React.FC<VoucherGeneratorProps> = ({ voucher, onClose })
                         <div style={S.value}>{voucher.room_number}</div>
                       </div>
                     )}
+                    {voucher.hotline_phone && (
+                      <div style={{ flex: 1, backgroundColor: 'rgba(123, 28, 28, 0.12)', borderRadius: 10, padding: '10px 16px', textAlign: 'center', borderLeft: '4px solid #7B1C1C' }}>
+                        <div style={{ fontSize: 11, color: '#7B1C1C', fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 }}>Hotline</div>
+                        <div style={{ fontSize: 22, fontWeight: 900, color: '#1a1a1a' }}>{voucher.hotline_phone}</div>
+                      </div>
+                    )}
                   </div>
                   <div style={S.divider} />
                 </>
@@ -234,58 +289,94 @@ const VoucherGenerator: React.FC<VoucherGeneratorProps> = ({ voucher, onClose })
               <div style={{ display: 'flex', gap: 24, marginBottom: 16, alignItems: 'flex-start' }}>
 
                 {/* LEFT: Price Summary */}
-                <div style={{ flex: cancelTerms || managerPhone ? 1 : undefined, width: cancelTerms || managerPhone ? undefined : '100%' }}>
-                  <div style={{ ...S.label, marginBottom: 12 }}>Price Summary</div>
+                <div style={{ flex: cancelTerms || managerPhone ? 1 : undefined, width: cancelTerms || managerPhone ? undefined : '100%', backgroundColor: '#f8f9ff', borderRadius: 10, padding: '14px 16px', border: '1px solid #dce4f0' }}>
+                  <div style={{ ...S.label, marginBottom: 12, backgroundColor: 'transparent' }}>Price Summary</div>
                   {(() => {
+                    const isIndividual = voucher.tour_type === 'individual' || voucher.tour_type === 'tourflot';
+                    const isJetski = isJetskiVoucher;
+                    if (isIndividual) {
+                      // Flat price — just show one line, no multiplication
+                      return totalSale > 0 ? (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
+                          <span style={{ fontSize: 18, color: '#666' }}>Tour:</span>
+                          <span style={{ fontSize: 18, color: '#333', fontWeight: 700 }}>{fmt(totalSale)}</span>
+                        </div>
+                      ) : null;
+                    }
+                    if (isJetski) {
+                      const jetskiPrice = num(voucher.adult_sale);
+                      const jetskiCount = jetskiConfig ? jetskiConfig.length : adults;
+                      return jetskiPrice > 0 ? (
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', alignItems: 'center', marginBottom: 10 }}>
+                          <span style={{ fontSize: 18, color: '#666', textAlign: 'left' }}>Гидроцикл:</span>
+                          <span style={{ fontSize: 18, color: '#555', textAlign: 'center' }}>{fmt(jetskiPrice)} × {jetskiCount}</span>
+                          <span style={{ fontSize: 18, color: '#333', textAlign: 'right', fontWeight: 700 }}>{fmt(jetskiPrice * jetskiCount)}</span>
+                        </div>
+                      ) : null;
+                    }
                     const rows = [
                       num(voucher.adult_sale) > 0   ? { label: 'Adult',    price: num(voucher.adult_sale),    qty: adults } : null,
                       num(voucher.child_sale) > 0 && children > 0 ? { label: 'Child',    price: num(voucher.child_sale),    qty: children } : null,
                       num(voucher.infant_sale) > 0 && infants > 0 ? { label: 'Infant',   price: num(voucher.infant_sale),   qty: infants } : null,
                       num(voucher.transfer_sale) > 0 ? { label: 'Transfer', price: num(voucher.transfer_sale), qty: adults + children } : null,
+                      num(voucher.other_sale) > 0 ? { label: 'Other', price: num(voucher.other_sale), qty: 1 } : null,
                     ].filter(Boolean) as { label: string; price: number; qty: number }[];
                     const fallback = rows.length === 0 && totalSale > 0
                       ? [{ label: 'Tour', price: totalPax > 0 ? totalSale / totalPax : totalSale, qty: totalPax > 0 ? totalPax : 1 }]
                       : rows;
                     return fallback.map((row) => (
                       <div key={row.label} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', alignItems: 'center', marginBottom: 10 }}>
-                        <span style={{ fontSize: 13, color: '#666', textAlign: 'left' }}>{row.label}:</span>
-                        <span style={{ fontSize: 13, color: '#555', textAlign: 'center' }}>{fmt(row.price)} × {row.qty}</span>
-                        <span style={{ fontSize: 13, color: '#333', textAlign: 'right' }}>{fmt(row.price * row.qty)}</span>
+                        <span style={{ fontSize: 18, color: '#666', textAlign: 'left' }}>{row.label}:</span>
+                        <span style={{ fontSize: 18, color: '#555', textAlign: 'center' }}>{row.qty > 1 ? `${fmt(row.price)} × ${row.qty}` : ''}</span>
+                        <span style={{ fontSize: 18, color: '#333', textAlign: 'right' }}>{fmt(row.price * row.qty)}</span>
                       </div>
                     ));
                   })()}
                   <div style={{ borderTop: '1px solid #eee', margin: '8px 0' }} />
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                    <span style={{ fontSize: 15, color: '#444' }}>Total Amount:</span>
-                    <span style={{ fontSize: 15, fontWeight: 700 }}>{fmt(totalSale)}</span>
+                    <span style={{ fontSize: 19, color: '#444' }}>Total Amount:</span>
+                    <span style={{ fontSize: 19, fontWeight: 700 }}>{fmt(totalSale)}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
-                    <span style={{ fontSize: 15, color: '#444' }}>Paid to Agency:</span>
-                    <span style={{ fontSize: 15, fontWeight: 700 }}>{fmt(paidToAgency)}</span>
+                    <span style={{ fontSize: 19, color: '#444' }}>Paid to Agency:</span>
+                    <span style={{ fontSize: 19, fontWeight: 700 }}>{fmt(paidToAgency)}</span>
                   </div>
+                  {cashOnTour > 0 && (
                   <div style={{ display: 'flex', justifyContent: 'space-between', backgroundColor: '#fff5f5', padding: '12px 16px', borderRadius: 8, borderLeft: `4px solid ${cashColor}` }}>
                     <span style={{ fontSize: 16, fontWeight: 800, color: cashColor }}>CASH ON TOUR:</span>
                     <span style={{ fontSize: 16, fontWeight: 800, color: cashColor }}>{fmt(cashOnTour)}</span>
                   </div>
+                  )}
                 </div>
 
                 {/* RIGHT: Cancellation + Hotline */}
                 <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12 }}>
                   {cancelTerms && (
                     <div style={{ backgroundColor: '#fff8f8', border: '1px solid #fca5a5', borderRadius: 8, padding: '12px 14px' }}>
-                      <div style={{ fontWeight: 800, fontSize: 12, color: '#c00', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>📋 Правила аннуляции тура</div>
-                      <div style={{ fontSize: 11.5, color: '#444', whiteSpace: 'pre-wrap', lineHeight: 1.65, textAlign: 'justify' }}>{cancelTerms}</div>
+                      <div style={{ fontWeight: 800, fontSize: 13, color: '#c00', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>📋 Правила аннуляции тура</div>
+                      <div style={{ fontSize: 13, color: '#444', whiteSpace: 'pre-wrap', lineHeight: 1.65, textAlign: 'justify' }}>{cancelTerms}</div>
                     </div>
                   )}
                   {managerPhone && (
-                    <div style={{ background: `linear-gradient(135deg, ${accentColor} 0%, ${accentColor}cc 100%)`, borderRadius: 10, padding: '14px 20px', textAlign: 'center' }}>
-                      <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 }}>24/7 Hotline</div>
-                      <div style={{ fontSize: 22, fontWeight: 900, color: 'white' }}>{managerPhone}</div>
+                    <div style={{ backgroundColor: 'rgba(123, 28, 28, 0.12)', borderRadius: 10, padding: '14px 20px', textAlign: 'center', borderLeft: '4px solid #7B1C1C' }}>
+                      <div style={{ fontSize: 11, color: '#7B1C1C', fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 }}>Hotline</div>
+                      <div style={{ fontSize: 22, fontWeight: 900, color: '#1a1a1a' }}>{managerPhone}</div>
                     </div>
                   )}
                 </div>
 
               </div>
+
+              {/* REMARKS */}
+              {voucher.remarks && (
+                <div style={{ marginBottom: 16 }}>
+                  <div style={S.divider} />
+                  <div style={{ backgroundColor: '#f9f9f9', border: '1px solid #e5e7eb', borderRadius: 8, padding: '12px 16px' }}>
+                    <div style={{ ...S.label, marginBottom: 6 }}>Remarks</div>
+                    <div style={{ fontSize: 13, color: '#444', whiteSpace: 'pre-wrap', lineHeight: 1.65 }}>{voucher.remarks}</div>
+                  </div>
+                </div>
+              )}
 
             </div>
 
@@ -302,6 +393,7 @@ const VoucherGenerator: React.FC<VoucherGeneratorProps> = ({ voucher, onClose })
             ) : (
               <div style={{ position: 'relative' }}>
                 <img src={footerImg} alt="footer" style={{ width: '100%', display: 'block' }} />
+                {!isJetskiVoucher && (
                 <div style={{
                   position: 'absolute', inset: 0,
                   display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
@@ -310,6 +402,7 @@ const VoucherGenerator: React.FC<VoucherGeneratorProps> = ({ voucher, onClose })
                     ПРИЯТНОГО ОТДЫХА!
                   </div>
                 </div>
+                )}
               </div>
             )}
 

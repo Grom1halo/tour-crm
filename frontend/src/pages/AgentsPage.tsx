@@ -9,6 +9,7 @@ const AgentsPage: React.FC = () => {
   const isAdmin = user?.role === 'admin';
   const [agents, setAgents] = useState<any[]>([]);
   const [search, setSearch] = useState('');
+  const [hideInactive, setHideInactive] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<any>(null);
   const [formData, setFormData] = useState({ name: '', commissionPercentage: 0, isActive: true });
@@ -67,6 +68,7 @@ const AgentsPage: React.FC = () => {
 
   const filtered = agents
     .filter(a => a.name.toLowerCase().includes(search.toLowerCase()))
+    .filter(a => !hideInactive || a.is_active)
     .sort((a, b) => {
       const av = a[sortKey], bv = b[sortKey];
       const cmp = typeof av === 'string' ? av.localeCompare(bv) : Number(av) - Number(bv);
@@ -85,8 +87,12 @@ const AgentsPage: React.FC = () => {
         )}
       </div>
 
-      <div className="bg-white rounded-lg shadow-sm p-4 mb-4">
+      <div className="bg-white rounded-lg shadow-sm p-4 mb-4 flex items-center gap-4">
         <input type="text" placeholder={t.agentsSearchHolder} value={search} onChange={e => setSearch(e.target.value)} className={inputCls} />
+        <label className="flex items-center gap-2 text-sm text-gray-600 whitespace-nowrap cursor-pointer">
+          <input type="checkbox" checked={hideInactive} onChange={e => setHideInactive(e.target.checked)} className="w-4 h-4" />
+          Скрыть неактивных
+        </label>
       </div>
 
       <div className="bg-white rounded-lg shadow-sm overflow-hidden">

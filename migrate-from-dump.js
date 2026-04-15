@@ -79,15 +79,35 @@ function parseDump(filePath, tables) {
   const result  = {};
   for (const t of tables) result[t] = [];
 
-  // Match: INSERT INTO `table` (`cols`) VALUES\n(row),(row),...;
-  const insertRe = /INSERT INTO `(\w+)` \(([^)]+)\) VALUES\s*([\s\S]*?);(?:\n|$)/g;
+  // Parse column order from CREATE TABLE statements
+  const tableColsMap = {};
+  const createRe = /CREATE TABLE(?: IF NOT EXISTS)? `(\w+)` \(([\s\S]*?)\) ENGINE/g;
+  let cm;
+  while ((cm = createRe.exec(content)) !== null) {
+    const tname = cm[1];
+    if (!tables.includes(tname)) continue;
+    tableColsMap[tname] = [...cm[2].matchAll(/^\s+`(\w+)`/gm)].map(m => m[1]);
+  }
+
+  // Match both:
+  //   INSERT INTO `table` (`col1`,`col2`) VALUES ...  — explicit columns
+  //   INSERT INTO `table` VALUES ...                  — no columns (use CREATE TABLE order)
+  const insertRe = /INSERT INTO `(\w+)` (?:\(([^)]+)\) )?VALUES\s*([\s\S]*?);(?:\n|$)/g;
   let match;
 
   while ((match = insertRe.exec(content)) !== null) {
     const tableName = match[1];
     if (!tables.includes(tableName)) continue;
 
-    const cols = match[2].split(',').map(c => c.trim().replace(/`/g, ''));
+    const cols = match[2]
+      ? match[2].split(',').map(c => c.trim().replace(/`/g, ''))
+      : (tableColsMap[tableName] || []);
+
+    if (cols.length === 0) {
+      warn(`${tableName}: no column info found, skipping`);
+      continue;
+    }
+
     const valuesBlock = match[3];
 
     // Parse individual row tuples
@@ -228,7 +248,7 @@ async function main() {
     console.log('\n=== DRY RUN PREVIEW ===');
     console.log(`\nUsers (${users.length}):`);
     users.slice(0, 3).forEach(u =>
-      console.log(`  id=${u.id}  name="${u.name}"  email="${u.email}"  percent=${u.manager_percent}`));
+      console.log(`  id=${u.id}  name="${u.name}"  email="${u.email}"  percent=${u.manager_percent || 0}`));
 
     console.log(`\nCompanies (${companies.length}):`);
     companies.slice(0, 5).forEach(c =>
@@ -236,7 +256,7 @@ async function main() {
 
     console.log(`\nTours (${company_tours.length}):`);
     company_tours.slice(0, 5).forEach(t =>
-      console.log(`  id=${t.id}  company=${t.company_id}  tour="${t.tour_name}"  nett_adult=${t.price_nett_adult}`));
+      console.log(`  id=${t.id}  company=${t.company_id}  tour="${t.tour_name || t.name}"  nett_adult=${t.price_nett_adult}`));
 
     console.log(`\nVouchers (${vouchers.length}) — first 3:`);
     vouchers.slice(0, 3).forEach(v =>
@@ -257,8 +277,8 @@ async function main() {
   try {
     await db.query('BEGIN');
 
-    // ── 4a. Users ────────────────────────────────────────────────────────────
-    log('Migrating users…');
+    // ── 4a. Users — lookup only, не создаём ──────────────────────────────────
+    log('Looking up managers in PG (no create)…');
     const userIdMap = new Map(); // old_id → new_id
 
     for (const u of users) {
@@ -267,73 +287,51 @@ async function main() {
         || `user_${u.id}`;
       const fullName = s(u.name) || username;
 
-      const res = await db.query(
-        `INSERT INTO users (username, password_hash, full_name, role, commission_percentage, is_active)
-         VALUES ($1, $2, $3, 'manager', $4, true)
-         ON CONFLICT (username) DO UPDATE
-           SET full_name = EXCLUDED.full_name,
-               commission_percentage = EXCLUDED.commission_percentage
-         RETURNING id`,
-        [username, u.password || '$2b$10$placeholder', fullName, f(u.manager_percent)]
-      );
-      userIdMap.set(String(u.id), res.rows[0].id);
+      let res = await db.query('SELECT id FROM users WHERE username=$1', [username]);
+      if (!res.rows.length) {
+        res = await db.query('SELECT id FROM users WHERE LOWER(full_name)=LOWER($1) LIMIT 1', [fullName]);
+      }
+      if (res.rows.length) {
+        userIdMap.set(String(u.id), res.rows[0].id);
+        log(`  manager found: "${fullName}" id=${res.rows[0].id}`);
+      } else {
+        warn(`  manager NOT found: "${fullName}" (username=${username}) → manager_id=null`);
+      }
     }
-    log(`  users: ${userIdMap.size}`);
+    log(`  managers matched: ${userIdMap.size}/${users.length}`);
 
-    // ── 4b. Companies ─────────────────────────────────────────────────────────
-    log('Migrating companies…');
+    // ── 4b. Companies — lookup only, не создаём ───────────────────────────────
+    log('Looking up companies in PG (no create)…');
     const companyIdMap = new Map(); // old_id → new_id
 
     for (const c of companies) {
       if (!s(c.name)) continue;
       const res = await db.query(
-        `INSERT INTO companies (name, is_active)
-         VALUES ($1, $2)
-         ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
-         RETURNING id`,
-        [s(c.name), c.deleted_at === null]
+        'SELECT id FROM companies WHERE LOWER(name)=LOWER($1) LIMIT 1', [s(c.name)]
       );
-      companyIdMap.set(String(c.id), res.rows[0].id);
+      if (res.rows.length) {
+        companyIdMap.set(String(c.id), res.rows[0].id);
+      } else {
+        warn(`  company NOT found: "${s(c.name)}" → company_id=null`);
+      }
     }
-    log(`  companies: ${companyIdMap.size}`);
+    log(`  companies matched: ${companyIdMap.size}/${companies.length}`);
 
-    // ── 4c. Tours ─────────────────────────────────────────────────────────────
-    log('Migrating tours (company_tours)…');
+    // ── 4c. Tours — lookup only, не создаём ──────────────────────────────────
+    log('Looking up tours in PG (no create)…');
     const tourIdMap = new Map(); // old company_tour id → new tour id
 
     for (const t of company_tours) {
-      const name = s(t.tour_name);
+      const name = s(t.tour_name || t.name);
       if (!name) continue;
-
-      let newTourId;
-      const existing = await db.query('SELECT id FROM tours WHERE name = $1', [name]);
-      if (existing.rows.length > 0) {
-        newTourId = existing.rows[0].id;
+      const res = await db.query('SELECT id FROM tours WHERE LOWER(name)=LOWER($1) LIMIT 1', [name]);
+      if (res.rows.length) {
+        tourIdMap.set(String(t.id), res.rows[0].id);
       } else {
-        const res = await db.query(
-          `INSERT INTO tours (name, tour_type, is_active)
-           VALUES ($1, 'group', $2)
-           RETURNING id`,
-          [name, t.deleted_at === null]
-        );
-        newTourId = res.rows[0].id;
-      }
-      tourIdMap.set(String(t.id), newTourId);
-
-      const newCompanyId = companyIdMap.get(String(t.company_id));
-      if (newCompanyId) {
-        await db.query(
-          `INSERT INTO tour_prices
-             (tour_id, company_id, valid_from, valid_to,
-              adult_net, child_net, infant_net, transfer_net, other_net,
-              adult_sale, child_sale, infant_sale, transfer_sale, other_sale)
-           VALUES ($1,$2,'2020-01-01','2099-12-31',$3,$4,0,0,0,$3,$4,0,0,0)
-           ON CONFLICT DO NOTHING`,
-          [newTourId, newCompanyId, f(t.price_nett_adult), f(t.price_nett_child)]
-        );
+        warn(`  tour NOT found: "${name}" → tour_id=null`);
       }
     }
-    log(`  tours: ${tourIdMap.size}`);
+    log(`  tours matched: ${tourIdMap.size}/${company_tours.length}`);
 
     // ── 4d. Agents ────────────────────────────────────────────────────────────
     log('Migrating agents…');
@@ -361,18 +359,29 @@ async function main() {
     const clientNewIdMap = new Map(); // "phone|old_manager_id" → new client_id
 
     for (const [key, c] of clientMap) {
-      const newManagerId = userIdMap.get(String(c.manager_id));
-      if (!newManagerId) {
-        warn(`Client "${c.name}" skipped: manager ${c.manager_id} not found`);
-        continue;
+      const newManagerId = userIdMap.get(String(c.manager_id)) || null;
+      let res;
+      if (newManagerId !== null) {
+        res = await db.query(
+          `INSERT INTO clients (name, phone, manager_id)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (phone, manager_id) DO UPDATE SET name = EXCLUDED.name
+           RETURNING id`,
+          [c.name || 'Unknown', c.phone || '', newManagerId]
+        );
+      } else if (c.phone) {
+        // Менеджер не найден — ищем по телефону
+        let r = await db.query('SELECT id FROM clients WHERE phone=$1 LIMIT 1', [c.phone]);
+        if (!r.rows.length) {
+          r = await db.query(
+            'INSERT INTO clients (name, phone, manager_id) VALUES ($1,$2,NULL) RETURNING id',
+            [c.name || 'Unknown', c.phone]
+          );
+        }
+        res = r;
+      } else {
+        continue; // нет ни телефона, ни менеджера — пропускаем
       }
-      const res = await db.query(
-        `INSERT INTO clients (name, phone, manager_id)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (phone, manager_id) DO UPDATE SET name = EXCLUDED.name
-         RETURNING id`,
-        [c.name || 'Unknown', c.phone || '', newManagerId]
-      );
       clientNewIdMap.set(key, res.rows[0].id);
     }
     log(`  clients: ${clientNewIdMap.size}`);
@@ -427,7 +436,7 @@ async function main() {
           : 0;
 
         let remarks = s(v.voucher_remarks);
-        if (int(v.voucher_important) === 1) remarks = `[ВАЖНО] ${remarks}`.trim();
+        if (int(v.voucher_important || 0) === 1) remarks = `[ВАЖНО] ${remarks}`.trim();
         if (s(v.voucher_cancellations))     remarks += ` | Отмена: ${s(v.voucher_cancellations)}`;
         remarks = remarks.trim() || null;
 

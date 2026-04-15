@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import * as api from '../api';
 import { useLanguage } from '../i18n/LanguageContext';
+import { PAYMENT_METHODS } from '../constants/paymentMethods';
 
 const VoucherFormPage: React.FC = () => {
   const { id } = useParams();
@@ -11,16 +12,11 @@ const VoucherFormPage: React.FC = () => {
   const { t } = useLanguage();
 
   const [loading, setLoading] = useState(false);
-  const [clients, setClients] = useState<any[]>([]);
   const [companies, setCompanies] = useState<any[]>([]);
   const [tours, setTours] = useState<any[]>([]);
   const [agents, setAgents] = useState<any[]>([]);
   const [loadingPrices, setLoadingPrices] = useState(false);
 
-  // New client inline form
-  const [showNewClient, setShowNewClient] = useState(false);
-  const [newClientData, setNewClientData] = useState({ name: '', phone: '' });
-  const [savingClient, setSavingClient] = useState(false);
 
   // New company inline form
   const [showNewCompany, setShowNewCompany] = useState(false);
@@ -31,6 +27,7 @@ const VoucherFormPage: React.FC = () => {
   const [agentSearch, setAgentSearch] = useState('');
   const [companySearch, setCompanySearch] = useState('');
   const [tourSearch, setTourSearch] = useState('');
+  const [tourEditOverride, setTourEditOverride] = useState(false); // edit name while keeping tourId for price lookup
 
   // Companies filtered by selected tour (null = show all)
   const [companiesForTour, setCompaniesForTour] = useState<any[] | null>(null);
@@ -40,8 +37,14 @@ const VoucherFormPage: React.FC = () => {
   const [newTourData, setNewTourData] = useState({ name: '', tourType: 'group' });
   const [savingTour, setSavingTour] = useState(false);
 
+  // Jetski passengers — individual count per jetski
+  const [jetskiPassengers, setJetskiPassengers] = useState<{adults: number; children: number}[]>([{adults: 2, children: 0}]);
+
+  // Paid to agency (loaded in edit mode from DB)
   // Payment section
   const today = new Date().toISOString().split('T')[0];
+  const [depositAmount, setDepositAmount] = useState('');
+  const [isConfirmedPaid, setIsConfirmedPaid] = useState(false);
   const [paymentData, setPaymentData] = useState({
     amount: '',
     paymentMethod: '',
@@ -54,15 +57,21 @@ const VoucherFormPage: React.FC = () => {
 
   const [formData, setFormData] = useState({
     tourType: 'group',
+    currency: 'THB',
     clientId: '',
+    clientName: '',
+    clientPhone: '',
+    hotlinePhone: '+66 65 706 3341',
     companyId: '',
+    companyDetails: '',
     tourId: '',
+    tourDetails: '',
     tourDate: '',
     tourDateEnd: '',
     tourTime: '',
     hotelName: '',
     roomNumber: '',
-    adults: 2,
+    adults: 0,
     children: 0,
     infants: 0,
     adultNet: 0,
@@ -91,25 +100,17 @@ const VoucherFormPage: React.FC = () => {
       } else {
         // Pre-fill from URL params (clone for client)
         const params = new URLSearchParams(location.search);
-        const clientId    = params.get('clientId');
         const clientName  = params.get('clientName');
         const clientPhone = params.get('clientPhone');
         const hotel = params.get('hotel');
         const room  = params.get('room');
-        if (clientId) {
-          // Ensure client appears in the select (may not be in the list for managers)
-          if (clientName) {
-            setClients(prev => {
-              const already = prev.find(c => String(c.id) === clientId);
-              if (already) return prev;
-              return [{ id: Number(clientId), name: clientName, phone: clientPhone || '' }, ...prev];
-            });
-          }
+        if (clientName || clientPhone || hotel || room) {
           setFormData(prev => ({
             ...prev,
-            clientId,
+            ...(clientName  ? { clientName }  : {}),
+            ...(clientPhone ? { clientPhone } : {}),
             ...(hotel ? { hotelName: hotel } : {}),
-            ...(room ? { roomNumber: room } : {}),
+            ...(room  ? { roomNumber: room }  : {}),
           }));
         } else if (hotel || room) {
           setFormData(prev => ({
@@ -147,6 +148,17 @@ const VoucherFormPage: React.FC = () => {
     if (!formData.tourId || formData.companyId) setCompaniesForTour(null);
   }, [formData.tourId, formData.companyId]);
 
+  // Auto-fill cancellation terms when tour is selected
+  useEffect(() => {
+    if (skipEffects.current) return;
+    if (!formData.tourId) return;
+    const selectedTour = tours.find((t: any) => String(t.id) === String(formData.tourId));
+    const terms = selectedTour?.cancellation_terms;
+    if (terms && terms.length > 0) {
+      setFormData(prev => ({ ...prev, cancellationNotes: terms.join('\n') }));
+    }
+  }, [formData.tourId, tours]);
+
   // Auto-fill prices when tour + company + date all selected
   useEffect(() => {
     if (skipEffects.current) return; // skip during initial edit load
@@ -175,13 +187,11 @@ const VoucherFormPage: React.FC = () => {
 
   const loadReferenceData = async () => {
     try {
-      const [clientsRes, companiesRes, agentsRes, toursRes] = await Promise.all([
-        api.getClients(),
+      const [companiesRes, agentsRes, toursRes] = await Promise.all([
         api.getCompanies(),
         api.getAgents(),
         api.getTours(),
       ]);
-      setClients(clientsRes.data);
       setCompanies(companiesRes.data);
       setAgents(agentsRes.data);
       setTours(toursRes.data);
@@ -194,11 +204,19 @@ const VoucherFormPage: React.FC = () => {
     try {
       const response = await api.getVoucherById(Number(id));
       const v = response.data;
+      setDepositAmount(Number(v.paid_to_agency) > 0 ? String(Number(v.paid_to_agency)) : '');
       setFormData({
         tourType: v.tour_type,
+        currency: v.currency || 'THB',
         clientId: v.client_id != null ? String(v.client_id) : '',
+        clientName: v.client_name || '',
+        clientPhone: v.client_phone || '',
+        hotlinePhone: v.hotline_phone || '+66 65 706 3341',
         companyId: v.company_id != null ? String(v.company_id) : '',
+        companyDetails: v.company_details || '',
         tourId: v.tour_id != null ? String(v.tour_id) : '',
+        tourDetails: v.tour_details || '',
+        // tourEditOverride: set below
         tourDate: v.tour_date ? v.tour_date.split('T')[0] : '',
         tourDateEnd: v.tour_date_end ? v.tour_date_end.split('T')[0] : '',
         tourTime: v.tour_time || '',
@@ -223,9 +241,17 @@ const VoucherFormPage: React.FC = () => {
         isImportant: v.is_important || false,
         cancellationNotes: v.cancellation_notes || '',
       });
+      // Parse per-jetski passenger config
+      if (v.tour_type === 'jetski' && v.jetski_config && Array.isArray(v.jetski_config) && v.jetski_config.length > 0) {
+        setJetskiPassengers(v.jetski_config);
+      }
       // If voucher has a company, load only that company's tours so dropdown is filtered
       if (v.company_id) {
         api.getToursByCompany(Number(v.company_id)).then(res => setTours(res.data)).catch(() => {});
+      }
+      // If both tourId and tourDetails are set → was saved with edit-override mode
+      if (v.tour_id && v.tour_details) {
+        setTourEditOverride(true);
       }
       return true;
     } catch (error) {
@@ -239,15 +265,23 @@ const VoucherFormPage: React.FC = () => {
     setLoading(true);
     try {
       let voucherId: number;
+      const deposit = Number(depositAmount) || 0;
+      // For jetski: override adults = number of jetskis, pack per-jetski data
+      const jetskiOverrides = formData.tourType === 'jetski' ? {
+        adults: jetskiPassengers.length,
+        children: 0,
+        infants: 0,
+        jetskiConfig: jetskiPassengers,
+      } : {};
       if (isEdit) {
-        await api.updateVoucher(Number(id), formData);
+        await api.updateVoucher(Number(id), { ...formData, ...jetskiOverrides, paidToAgency: deposit });
         voucherId = Number(id);
       } else {
-        const res = await api.createVoucher(formData);
+        const res = await api.createVoucher({ ...formData, ...jetskiOverrides, paidToAgency: deposit });
         voucherId = res.data.id;
       }
-      // Save payment if amount entered
-      if (paymentData.amount && Number(paymentData.amount) > 0 && paymentData.paymentMethod) {
+      // Save payment only if "Оплачено" checkbox is checked
+      if (isConfirmedPaid && paymentData.amount && Number(paymentData.amount) > 0) {
         await api.addPayment({
           voucherId,
           amount: Number(paymentData.amount),
@@ -270,6 +304,9 @@ const VoucherFormPage: React.FC = () => {
     setFormData(prev => ({
       ...prev,
       [name]: type === 'checkbox' ? checked : type === 'number' ? Number(value) : value,
+      // Auto-set currency when tour type changes
+      ...(name === 'tourType' && value === 'vietnam' && prev.currency === 'THB' ? { currency: 'VND' } : {}),
+      ...(name === 'tourType' && value !== 'vietnam' ? { currency: 'THB' } : {}),
     }));
   };
 
@@ -283,28 +320,11 @@ const VoucherFormPage: React.FC = () => {
     }));
   };
 
-  const handleCreateClient = async () => {
-    if (!newClientData.name.trim() || !newClientData.phone.trim()) return;
-    setSavingClient(true);
-    try {
-      const res = await api.createClient(newClientData);
-      const created = res.data;
-      setClients(prev => [created, ...prev]);
-      setFormData(prev => ({ ...prev, clientId: String(created.id) }));
-      setNewClientData({ name: '', phone: '' });
-      setShowNewClient(false);
-    } catch (error: any) {
-      alert(error.response?.data?.error || 'Failed to create client');
-    } finally {
-      setSavingClient(false);
-    }
-  };
-
   const handleCreateTour = async () => {
     if (!newTourData.name.trim()) return;
     setSavingTour(true);
     try {
-      const res = await api.createTour({ name: newTourData.name.trim(), tourType: newTourData.tourType });
+      const res = await api.createTour({ name: newTourData.name.trim(), tourType: newTourData.tourType, companyId: formData.companyId ? Number(formData.companyId) : null });
       const created = res.data;
       setTours(prev => [...prev, created]);
       setFormData(prev => ({ ...prev, tourId: String(created.id) }));
@@ -338,18 +358,19 @@ const VoucherFormPage: React.FC = () => {
     const adults = Number(formData.adults);
     const children = Number(formData.children);
     const infants = Number(formData.infants);
-    const totalNet =
-      adults * Number(formData.adultNet) +
-      children * Number(formData.childNet) +
-      infants * Number(formData.infantNet) +
-      (adults + children) * Number(formData.transferNet) +
-      Number(formData.otherNet);
-    const totalSale =
-      adults * Number(formData.adultSale) +
-      children * Number(formData.childSale) +
-      infants * Number(formData.infantSale) +
-      (adults + children) * Number(formData.transferSale) +
-      Number(formData.otherSale);
+    const isFlat = formData.tourType === 'individual' || formData.tourType === 'tourflot';
+    const isJetski = formData.tourType === 'jetski';
+    const jetskiCount = isJetski ? jetskiPassengers.length : adults;
+    const totalNet = isFlat
+      ? Number(formData.adultNet) + Number(formData.childNet) + Number(formData.infantNet) + Number(formData.transferNet) + Number(formData.otherNet)
+      : isJetski
+      ? jetskiCount * Number(formData.adultNet) + Number(formData.otherNet)
+      : adults * Number(formData.adultNet) + children * Number(formData.childNet) + infants * Number(formData.infantNet) + (adults + children) * Number(formData.transferNet) + Number(formData.otherNet);
+    const totalSale = isFlat
+      ? Number(formData.adultSale) + Number(formData.childSale) + Number(formData.infantSale) + Number(formData.transferSale) + Number(formData.otherSale)
+      : isJetski
+      ? jetskiCount * Number(formData.adultSale) + Number(formData.otherSale)
+      : adults * Number(formData.adultSale) + children * Number(formData.childSale) + infants * Number(formData.infantSale) + (adults + children) * Number(formData.transferSale) + Number(formData.otherSale);
     return { totalNet, totalSale };
   };
 
@@ -389,52 +410,43 @@ const VoucherFormPage: React.FC = () => {
                 <option value="group">{t.typeGroup}</option>
                 <option value="individual">{t.typeIndividual}</option>
                 <option value="tourflot">{t.typeTourflot}</option>
+                <option value="jetski">Гидроцикл</option>
+                <option value="vietnam">Вьетнам</option>
               </select>
             </div>
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className={labelCls + ' mb-0'}>{t.formClient}</label>
-                <button
-                  type="button"
-                  onClick={() => setShowNewClient(v => !v)}
-                  className="text-xs text-blue-600 hover:text-blue-800 font-medium"
-                >
-                  {showNewClient ? t.cancel : t.formNewClientBtn}
-                </button>
+            {formData.tourType === 'vietnam' && (
+              <div>
+                <label className={labelCls}>Валюта</label>
+                <select name="currency" value={formData.currency} onChange={handleChange} className={inputCls}>
+                  <option value="VND">₫ Донги (VND)</option>
+                  <option value="USD">$ Доллары (USD)</option>
+                  <option value="RUB">₽ Рубли (RUB)</option>
+                </select>
               </div>
-              <select name="clientId" value={formData.clientId} onChange={handleChange} className={inputCls} required>
-                <option value="">{t.formSelectClient}</option>
-                {clients.map(c => (
-                  <option key={c.id} value={c.id}>{c.name} ({c.phone})</option>
-                ))}
-              </select>
-              {showNewClient && (
-                <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-lg space-y-2">
-                  <p className="text-xs font-semibold text-blue-700">{t.formNewClientTitle}</p>
-                  <input
-                    type="text"
-                    placeholder={t.clientsNameLabel}
-                    value={newClientData.name}
-                    onChange={e => setNewClientData(prev => ({ ...prev, name: e.target.value }))}
-                    className={inputCls}
-                  />
-                  <input
-                    type="text"
-                    placeholder={t.clientsPhoneLabel}
-                    value={newClientData.phone}
-                    onChange={e => setNewClientData(prev => ({ ...prev, phone: e.target.value }))}
-                    className={inputCls}
-                  />
-                  <button
-                    type="button"
-                    onClick={handleCreateClient}
-                    disabled={savingClient || !newClientData.name.trim() || !newClientData.phone.trim()}
-                    className="w-full px-3 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:bg-gray-400 transition"
-                  >
-                    {savingClient ? t.saving : t.formClientCreate}
-                  </button>
-                </div>
-              )}
+            )}
+            <div className="space-y-2">
+              <div>
+                <label className={labelCls}>{t.formClient}</label>
+                <input
+                  type="text"
+                  name="clientName"
+                  value={formData.clientName}
+                  onChange={handleChange}
+                  placeholder="Имя клиента"
+                  className={inputCls}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Телефон клиента</label>
+                <input
+                  type="text"
+                  name="clientPhone"
+                  value={formData.clientPhone}
+                  onChange={handleChange}
+                  placeholder="+66 ..."
+                  className={inputCls}
+                />
+              </div>
             </div>
             <div>
               <div className="flex items-center justify-between mb-1">
@@ -462,6 +474,16 @@ const VoucherFormPage: React.FC = () => {
                   className="w-full px-3 py-1.5 mb-1 border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-400"
                 />
               )}
+              {formData.companyDetails.trim() ? (
+                <input
+                  type="text"
+                  placeholder="Название компании..."
+                  value={formData.companyDetails === '_' ? '' : formData.companyDetails}
+                  onChange={e => setFormData(prev => ({ ...prev, companyDetails: e.target.value || '_', companyId: '' }))}
+                  className={inputCls}
+                  autoFocus
+                />
+              ) : (
               <select
                 name="companyId"
                 value={formData.companyId}
@@ -473,7 +495,7 @@ const VoucherFormPage: React.FC = () => {
                   loadToursForCompany(newCompanyId);
                 }}
                 className={inputCls}
-                required
+                required={!formData.companyDetails}
               >
                 <option value="">{t.formSelectCompany}</option>
                 {(companiesForTour ?? companies)
@@ -489,6 +511,18 @@ const VoucherFormPage: React.FC = () => {
                     </option>
                   ))}
               </select>
+              )}
+              <button
+                type="button"
+                onClick={() => setFormData(prev => ({
+                  ...prev,
+                  companyDetails: prev.companyDetails.trim() ? '' : '_',
+                  companyId: prev.companyDetails.trim() ? prev.companyId : '',
+                }))}
+                className="mt-1 text-xs text-blue-500 hover:text-blue-700 underline"
+              >
+                {formData.companyDetails ? '← Выбрать из списка' : '✏ Вписать вручную'}
+              </button>
               {showNewCompany && (
                 <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-lg space-y-2">
                   <p className="text-xs font-semibold text-blue-700">{t.formNewCompanyTitle}</p>
@@ -511,6 +545,12 @@ const VoucherFormPage: React.FC = () => {
               )}
             </div>
           </div>
+        </div>
+
+        {/* Remarks — shown right after client block */}
+        <div className="bg-white rounded-lg shadow-sm p-4">
+          <label className={labelCls}>{t.formRemarks}</label>
+          <textarea name="remarks" value={formData.remarks} onChange={handleChange} rows={2} className={inputCls} />
         </div>
 
         {/* Row 2: tour + dates */}
@@ -539,6 +579,18 @@ const VoucherFormPage: React.FC = () => {
                   className="w-full px-3 py-1.5 mb-1 border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-400"
                 />
               )}
+              {/* MODE 1: manual text (no tourId) */}
+              {formData.tourDetails.trim() && !tourEditOverride ? (
+                <input
+                  type="text"
+                  placeholder="Название тура / детали услуги..."
+                  value={formData.tourDetails === '_' ? '' : formData.tourDetails}
+                  onChange={e => setFormData(prev => ({ ...prev, tourDetails: e.target.value || '_', tourId: '' }))}
+                  className={inputCls}
+                  autoFocus
+                />
+              ) : (
+              /* MODE 2 & 3: dropdown (+ optional edit field below) */
               <select name="tourId" value={formData.tourId} onChange={e => {
                 const newTourId = e.target.value;
                 const picked = tours.find((t: any) => String(t.id) === newTourId);
@@ -546,16 +598,18 @@ const VoucherFormPage: React.FC = () => {
                 const autoCompanyId = picked?.company_id && !formData.companyId
                   ? String(picked.company_id)
                   : null;
+                // If in edit-override mode, update tourDetails to new tour name
+                const newTourDetails = tourEditOverride && picked ? picked.name : formData.tourDetails;
                 setFormData(prev => ({
                   ...prev,
                   tourId: newTourId,
+                  tourDetails: newTourDetails,
                   ...(autoCompanyId ? { companyId: autoCompanyId } : {}),
                 }));
-                // If we just auto-filled a company, load that company's tours
                 if (autoCompanyId) {
                   loadToursForCompany(autoCompanyId, newTourId);
                 }
-              }} className={inputCls} required size={tourSearch ? Math.min(8, tours.filter(tour => {
+              }} className={inputCls} required={!formData.tourDetails && !tourEditOverride} size={tourSearch ? Math.min(8, tours.filter(tour => {
                 const q = tourSearch.toLowerCase();
                 const art = (tour.price_article || tour.tour_article || tour.article || '').toLowerCase();
                 return tour.name.toLowerCase().includes(q) || art.includes(q);
@@ -577,6 +631,63 @@ const VoucherFormPage: React.FC = () => {
                     );
                   })}
               </select>
+              )}
+
+              {/* MODE 3: editable name input (tourId kept for prices) */}
+              {tourEditOverride && (
+                <input
+                  type="text"
+                  placeholder="Название тура (можно дополнить)..."
+                  value={formData.tourDetails}
+                  onChange={e => setFormData(prev => ({ ...prev, tourDetails: e.target.value }))}
+                  className={inputCls + ' mt-1 border-blue-300 bg-blue-50'}
+                  autoFocus
+                />
+              )}
+
+              {/* Action buttons */}
+              <div className="mt-1 flex gap-3 flex-wrap">
+                {/* Switch to full manual mode */}
+                {!tourEditOverride && (
+                  <button
+                    type="button"
+                    onClick={() => setFormData(prev => ({
+                      ...prev,
+                      tourDetails: prev.tourDetails.trim() ? '' : '_',
+                      tourId: prev.tourDetails.trim() ? prev.tourId : '',
+                    }))}
+                    className="text-xs text-blue-500 hover:text-blue-700 underline"
+                  >
+                    {formData.tourDetails && !tourEditOverride ? '← Выбрать из списка' : '✏ Вписать вручную'}
+                  </button>
+                )}
+                {/* Toggle edit-override mode */}
+                {!formData.tourDetails.trim() && !tourEditOverride && formData.tourId && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const picked = tours.find((t: any) => String(t.id) === String(formData.tourId));
+                      setFormData(prev => ({ ...prev, tourDetails: picked?.name || '' }));
+                      setTourEditOverride(true);
+                    }}
+                    className="text-xs text-green-600 hover:text-green-800 underline"
+                  >
+                    ✏ Дополнить название
+                  </button>
+                )}
+                {tourEditOverride && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTourEditOverride(false);
+                      setFormData(prev => ({ ...prev, tourDetails: '' }));
+                    }}
+                    className="text-xs text-gray-500 hover:text-gray-700 underline"
+                  >
+                    ✕ Убрать дополнение
+                  </button>
+                )}
+              </div>
               {showNewTour && (
                 <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-lg space-y-2">
                   <p className="text-xs font-semibold text-blue-700">{t.formNewTourTitle}</p>
@@ -595,6 +706,7 @@ const VoucherFormPage: React.FC = () => {
                     <option value="group">{t.typeGroup}</option>
                     <option value="individual">{t.typeIndividual}</option>
                     <option value="tourflot">{t.typeTourflot}</option>
+                    <option value="jetski">Гидроцикл</option>
                   </select>
                   <button
                     type="button"
@@ -635,7 +747,7 @@ const VoucherFormPage: React.FC = () => {
 
         {/* Row 3: hotel */}
         <div className="bg-white rounded-lg shadow-sm p-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <label className={labelCls}>{t.formHotel}</label>
               <input type="text" name="hotelName" value={formData.hotelName} onChange={handleChange} className={inputCls} />
@@ -644,42 +756,135 @@ const VoucherFormPage: React.FC = () => {
               <label className={labelCls}>{t.formRoom}</label>
               <input type="text" name="roomNumber" value={formData.roomNumber} onChange={handleChange} className={inputCls} />
             </div>
+            <div>
+              <label className={labelCls}>Hotline</label>
+              <input type="text" name="hotlinePhone" value={formData.hotlinePhone} onChange={handleChange} placeholder="+66 65 706 3341" className={inputCls} />
+            </div>
           </div>
         </div>
 
         {/* Row 4: pax */}
         <div className="bg-white rounded-lg shadow-sm p-4">
-          <h3 className="text-sm font-semibold text-gray-700 mb-3">{t.formGuestsTitle}</h3>
-          <div className="grid grid-cols-3 gap-4">
-            <div>
-              <label className={labelCls}>{t.formAdults}</label>
-              <input type="number" name="adults" value={formData.adults} onChange={handleChange} min="0" className={inputCls} />
-            </div>
-            <div>
-              <label className={labelCls}>{t.formChildren}</label>
-              <input type="number" name="children" value={formData.children} onChange={handleChange} min="0" className={inputCls} />
-            </div>
-            <div>
-              <label className={labelCls}>{t.formInfants}</label>
-              <input type="number" name="infants" value={formData.infants} onChange={handleChange} min="0" className={inputCls} />
-            </div>
-          </div>
+          {formData.tourType === 'jetski' ? (
+            <>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold text-gray-700">Гидроциклы ({jetskiPassengers.length} шт.)</h3>
+                <button
+                  type="button"
+                  onClick={() => setJetskiPassengers(prev => [...prev, { adults: 2, children: 0 }])}
+                  className="px-3 py-1 bg-blue-600 text-white text-xs rounded-lg hover:bg-blue-700 transition"
+                >
+                  + Добавить гидроцикл
+                </button>
+              </div>
+              <div className="space-y-2">
+                {/* Header row */}
+                <div className="grid grid-cols-[auto_1fr_1fr_auto] gap-3 items-center text-xs font-medium text-gray-500 px-2">
+                  <span className="w-8">#</span>
+                  <span>Взрослых (макс 2)</span>
+                  <span>Детей (макс 1)</span>
+                  <span className="w-8"></span>
+                </div>
+                {jetskiPassengers.map((jp, idx) => (
+                  <div key={idx} className="grid grid-cols-[auto_1fr_1fr_auto] gap-3 items-center bg-gray-50 rounded-lg px-2 py-2">
+                    <span className="w-8 text-sm font-bold text-gray-500 text-center">{idx + 1}</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="2"
+                      value={jp.adults}
+                      onChange={e => {
+                        const val = Math.min(2, Math.max(0, Number(e.target.value)));
+                        setJetskiPassengers(prev => prev.map((p, i) => i === idx ? { ...p, adults: val } : p));
+                      }}
+                      className={inputCls}
+                    />
+                    <input
+                      type="number"
+                      min="0"
+                      max="1"
+                      value={jp.children}
+                      onChange={e => {
+                        const val = Math.min(1, Math.max(0, Number(e.target.value)));
+                        setJetskiPassengers(prev => prev.map((p, i) => i === idx ? { ...p, children: val } : p));
+                      }}
+                      className={inputCls}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setJetskiPassengers(prev => prev.filter((_, i) => i !== idx))}
+                      className="w-8 text-red-400 hover:text-red-600 text-lg font-bold text-center"
+                      title="Удалить"
+                    >×</button>
+                  </div>
+                ))}
+              </div>
+              {/* Totals summary */}
+              <div className="mt-3 text-xs text-gray-500 bg-blue-50 rounded-lg px-3 py-2">
+                Итого: {jetskiPassengers.length} гидроцикл(а) •{' '}
+                Взрослых: {jetskiPassengers.reduce((s, p) => s + p.adults, 0)} •{' '}
+                Детей: {jetskiPassengers.reduce((s, p) => s + p.children, 0)}
+              </div>
+            </>
+          ) : (
+            <>
+              <h3 className="text-sm font-semibold text-gray-700 mb-3">{t.formGuestsTitle}</h3>
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className={labelCls}>{t.formAdults}</label>
+                  <input type="number" name="adults" value={formData.adults} onChange={handleChange} min="0" className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>{t.formChildren}</label>
+                  <input type="number" name="children" value={formData.children} onChange={handleChange} min="0" className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>{t.formInfants}</label>
+                  <input type="number" name="infants" value={formData.infants} onChange={handleChange} min="0" className={inputCls} />
+                </div>
+              </div>
+            </>
+          )}
         </div>
 
         {/* Row 5: prices */}
         <div className="bg-white rounded-lg shadow-sm p-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <h3 className="text-sm font-semibold text-gray-700 mb-3">{t.formNetPricesTitle}</h3>
-              <div className="grid grid-cols-2 gap-3">
-                {netFields.map(([fname, label]) => (
-                  <div key={fname}>
-                    <label className={labelCls}>{label}</label>
-                    <input type="number" name={fname} value={(formData as any)[fname]} onChange={handleChange} step="0.01" className={inputCls} />
-                  </div>
-                ))}
+          {formData.tourType === 'jetski' ? (
+            <div className="grid grid-cols-2 gap-6">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-700 mb-3">{t.formSalePricesTitle}</h3>
+                <div>
+                  <label className={labelCls}>Цена за гидроцикл (продажа) ฿</label>
+                  <input type="number" name="adultSale" value={formData.adultSale} onChange={handleChange} step="0.01" className={inputCls} />
+                </div>
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-gray-700 mb-3">{t.formNetPricesTitle}</h3>
+                <div>
+                  <label className={labelCls}>Цена за гидроцикл (нетто) ฿</label>
+                  <input type="number" name="adultNet" value={formData.adultNet} onChange={handleChange} step="0.01" className={inputCls} />
+                </div>
               </div>
             </div>
+          ) : (formData.tourType === 'individual' || formData.tourType === 'tourflot') ? (
+            <div className="grid grid-cols-2 gap-6">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-700 mb-3">{t.formSalePricesTitle}</h3>
+                <div>
+                  <label className={labelCls}>Цена (за группу) ฿</label>
+                  <input type="number" name="adultSale" value={formData.adultSale} onChange={handleChange} step="0.01" className={inputCls} />
+                </div>
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-gray-700 mb-3">{t.formNetPricesTitle}</h3>
+                <div>
+                  <label className={labelCls}>Цена (за группу) ฿</label>
+                  <input type="number" name="adultNet" value={formData.adultNet} onChange={handleChange} step="0.01" className={inputCls} />
+                </div>
+              </div>
+            </div>
+          ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
               <h3 className="text-sm font-semibold text-gray-700 mb-3">{t.formSalePricesTitle}</h3>
               <div className="grid grid-cols-2 gap-3">
@@ -691,10 +896,22 @@ const VoucherFormPage: React.FC = () => {
                 ))}
               </div>
             </div>
+            <div>
+              <h3 className="text-sm font-semibold text-gray-700 mb-3">{t.formNetPricesTitle}</h3>
+              <div className="grid grid-cols-2 gap-3">
+                {netFields.map(([fname, label]) => (
+                  <div key={fname}>
+                    <label className={labelCls}>{label}</label>
+                    <input type="number" name={fname} value={(formData as any)[fname]} onChange={handleChange} step="0.01" className={inputCls} />
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
+          )}
 
           {/* Totals */}
-          <div className="mt-4 bg-blue-50 rounded-lg p-3 grid grid-cols-3 gap-4 text-sm font-semibold">
+          <div className="mt-4 bg-blue-50 rounded-lg p-3 grid grid-cols-4 gap-4 text-sm font-semibold">
             <div>
               <span className="text-gray-600">{t.formNetTotal}</span>
               <span className="ml-2 text-blue-700">฿{totalNet.toFixed(2)}</span>
@@ -707,6 +924,12 @@ const VoucherFormPage: React.FC = () => {
               <span className="text-gray-600">{t.formProfit}</span>
               <span className={`ml-2 font-bold ${totalSale - totalNet >= 0 ? 'text-green-700' : 'text-red-600'}`}>
                 ฿{(totalSale - totalNet).toFixed(2)}
+              </span>
+            </div>
+            <div>
+              <span className="text-gray-600">Кэш на туре</span>
+              <span className={`ml-2 font-bold ${totalSale - Number(depositAmount || 0) > 0 ? 'text-orange-600' : 'text-gray-500'}`}>
+                ฿{Math.max(0, totalSale - Number(depositAmount || 0)).toFixed(2)}
               </span>
             </div>
           </div>
@@ -739,10 +962,6 @@ const VoucherFormPage: React.FC = () => {
             </div>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-            <div>
-              <label className={labelCls}>{t.formRemarks}</label>
-              <textarea name="remarks" value={formData.remarks} onChange={handleChange} rows={3} className={inputCls} />
-            </div>
             <div>
               <label className={labelCls}>{t.formCancellationNotes}</label>
               <select
@@ -787,54 +1006,84 @@ const VoucherFormPage: React.FC = () => {
         {/* Row 7: Payment */}
         <div className="bg-white rounded-lg shadow-sm p-4 border-l-4 border-green-400">
           <h3 className="text-sm font-semibold text-gray-700 mb-3">
-            💳 {t.formPaymentTitle}
+            💰 Депозит
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className={labelCls}>{t.formPaymentAmount}</label>
+              <label className={labelCls}>Сумма депозита</label>
               <input
                 type="number"
-                value={paymentData.amount}
-                onChange={e => setPaymentData(prev => ({ ...prev, amount: e.target.value }))}
+                value={depositAmount}
+                onChange={e => setDepositAmount(e.target.value)}
                 step="0.01"
                 min="0"
                 placeholder="0"
                 className={inputCls}
               />
+              <p className="text-xs text-gray-400 mt-1">Ожидаемая сумма оплаты. Влияет на кэш на туре.</p>
             </div>
-            <div>
-              <label className={labelCls}>{t.formPaymentMethod}</label>
-              <select
-                value={paymentData.paymentMethod}
-                onChange={e => setPaymentData(prev => ({ ...prev, paymentMethod: e.target.value }))}
-                className={inputCls}
-              >
-                <option value="">{t.formPaymentSelectMethod}</option>
-                <option value="Наличные">{t.formPaymentCash}</option>
-                <option value="Карта">{t.formPaymentCard}</option>
-                <option value="Перевод">{t.formPaymentTransfer}</option>
-                <option value="Другое">{t.formPaymentOther}</option>
-              </select>
-            </div>
-            <div>
-              <label className={labelCls}>{t.formPaymentDate}</label>
-              <input
-                type="date"
-                value={paymentData.paymentDate}
-                onChange={e => setPaymentData(prev => ({ ...prev, paymentDate: e.target.value }))}
-                className={inputCls}
-              />
-            </div>
-            <div>
-              <label className={labelCls}>{t.formPaymentNotes}</label>
-              <input
-                type="text"
-                value={paymentData.notes}
-                onChange={e => setPaymentData(prev => ({ ...prev, notes: e.target.value }))}
-                className={inputCls}
-              />
+            <div className="flex items-center">
+              <label className="flex items-center gap-3 cursor-pointer select-none mt-4">
+                <input
+                  type="checkbox"
+                  checked={isConfirmedPaid}
+                  onChange={e => {
+                    setIsConfirmedPaid(e.target.checked);
+                    if (e.target.checked && !paymentData.amount) {
+                      setPaymentData(prev => ({ ...prev, amount: depositAmount }));
+                    }
+                  }}
+                  className="w-5 h-5 accent-green-600"
+                />
+                <span className="text-sm font-medium text-gray-700">✅ Оплачено (создать запись об оплате)</span>
+              </label>
             </div>
           </div>
+          {isConfirmedPaid && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 pt-4 border-t border-gray-100">
+              <div>
+                <label className={labelCls}>Сумма оплаты</label>
+                <input
+                  type="number"
+                  value={paymentData.amount}
+                  onChange={e => setPaymentData(prev => ({ ...prev, amount: e.target.value }))}
+                  step="0.01"
+                  min="0"
+                  placeholder="0"
+                  className={inputCls}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>{t.formPaymentMethod}</label>
+                <select
+                  value={paymentData.paymentMethod}
+                  onChange={e => setPaymentData(prev => ({ ...prev, paymentMethod: e.target.value }))}
+                  className={inputCls}
+                >
+                  <option value="">{t.formPaymentSelectMethod}</option>
+                  {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className={labelCls}>{t.formPaymentDate}</label>
+                <input
+                  type="date"
+                  value={paymentData.paymentDate}
+                  onChange={e => setPaymentData(prev => ({ ...prev, paymentDate: e.target.value }))}
+                  className={inputCls}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>{t.formPaymentNotes}</label>
+                <input
+                  type="text"
+                  value={paymentData.notes}
+                  onChange={e => setPaymentData(prev => ({ ...prev, notes: e.target.value }))}
+                  className={inputCls}
+                />
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Actions */}

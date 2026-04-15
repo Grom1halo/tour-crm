@@ -22,6 +22,8 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     { path: '/tours',     label: t.navTours,     roles: ['admin', 'editor'] },
     { path: '/agents',    label: t.navAgents,    roles: ['admin', 'manager'] },
     { path: '/managers',  label: t.navManagers,  roles: ['admin', 'accountant'] },
+    { path: '/accounting', label: 'Бухгалтерия', roles: ['admin', 'accountant'] },
+    { path: '/statistics', label: 'Статистика', roles: ['admin', 'accountant'] },
   ];
 
   const visibleItems = navItems.filter(item => !user || item.roles.some(r => hasRole(r)));

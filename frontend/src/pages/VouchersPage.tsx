@@ -17,12 +17,13 @@ const VouchersPage: React.FC = () => {
   const [managerId, setManagerId] = useState('');
   const [showDeleted, setShowDeleted] = useState(false);
   const [isImportant, setIsImportant] = useState(false);
+  const [hideServed, setHideServed] = useState(true);
   const [tourDateFrom, setTourDateFrom] = useState('');
   const [tourDateTo, setTourDateTo] = useState('');
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 10;
 
-  const [sortKey, setSortKey] = useState<'voucher_number'|'created_at'|'tour_date'|'client_name'|'company_name'|'total_sale'|'payment_status'>('tour_date');
+  const [sortKey, setSortKey] = useState<'voucher_number'|'created_at'|'tour_date'|'client_name'|'company_name'|'total_sale'|'payment_status'>('created_at');
   const [sortDir, setSortDir] = useState<'asc'|'desc'>('desc');
 
   const handleSort = (key: typeof sortKey) => {
@@ -32,7 +33,8 @@ const VouchersPage: React.FC = () => {
   const SortIcon = ({ k }: { k: typeof sortKey }) =>
     <span className="ml-1 opacity-50">{sortKey === k ? (sortDir === 'asc' ? '▲' : '▼') : '⇅'}</span>;
 
-  const sorted = [...vouchers].sort((a, b) => {
+  const filtered = hideServed ? vouchers.filter(v => !v.is_served) : vouchers;
+  const sorted = [...filtered].sort((a, b) => {
     const av = a[sortKey] ?? '', bv = b[sortKey] ?? '';
     const cmp = (sortKey === 'total_sale')
       ? Number(av) - Number(bv)
@@ -46,7 +48,7 @@ const VouchersPage: React.FC = () => {
     }
   }, [user]);
 
-  useEffect(() => { setPage(1); }, [search, paymentStatus, managerId, showDeleted, isImportant, tourDateFrom, tourDateTo]);
+  useEffect(() => { setPage(1); }, [search, paymentStatus, managerId, showDeleted, isImportant, tourDateFrom, tourDateTo, hideServed]);
 
   useEffect(() => {
     loadVouchers();
@@ -70,6 +72,13 @@ const VouchersPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleToggleServed = async (id: number) => {
+    try {
+      await api.toggleServed(id);
+      setVouchers(prev => prev.map(v => v.id === id ? { ...v, is_served: !v.is_served } : v));
+    } catch { alert('Ошибка'); }
   };
 
   const handleDelete = async (id: number) => {
@@ -143,7 +152,7 @@ const VouchersPage: React.FC = () => {
             </select>
           )}
 
-          <div className="flex gap-4 items-center">
+          <div className="flex gap-4 items-center flex-wrap">
             <label className="flex items-center gap-1 text-sm cursor-pointer">
               <input type="checkbox" checked={showDeleted} onChange={e => setShowDeleted(e.target.checked)} className="w-4 h-4" />
               {t.vouchersShowDeleted}
@@ -151,6 +160,10 @@ const VouchersPage: React.FC = () => {
             <label className="flex items-center gap-1 text-sm cursor-pointer text-red-600">
               <input type="checkbox" checked={isImportant} onChange={e => setIsImportant(e.target.checked)} className="w-4 h-4" />
               {t.vouchersImportant}
+            </label>
+            <label className="flex items-center gap-1 text-sm cursor-pointer text-green-700">
+              <input type="checkbox" checked={hideServed} onChange={e => setHideServed(e.target.checked)} className="w-4 h-4 accent-green-600" />
+              Скрыть обслуж.
             </label>
           </div>
         </div>
@@ -165,7 +178,7 @@ const VouchersPage: React.FC = () => {
             <input type="date" value={tourDateTo} onChange={e => setTourDateTo(e.target.value)} className={inputCls + ' flex-1'} />
           </div>
           <div className="col-span-2 text-xs text-gray-400 flex items-center">
-            {t.vouchersFound}: {vouchers.length} | {t.vouchersPage} {page} {t.vouchersOf} {Math.max(1, Math.ceil(vouchers.length / PAGE_SIZE))}
+            {t.vouchersFound}: {filtered.length} | {t.vouchersPage} {page} {t.vouchersOf} {Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))}
           </div>
         </div>
       </div>
@@ -186,6 +199,7 @@ const VouchersPage: React.FC = () => {
                       ? <th key={k} onClick={() => handleSort(k)} className={`px-3 py-3 ${align} text-xs font-semibold text-gray-500 uppercase cursor-pointer hover:text-gray-700 select-none whitespace-nowrap`}>{label}<SortIcon k={k} /></th>
                       : <th key={label} className={`px-3 py-3 ${align} text-xs font-semibold text-gray-500 uppercase whitespace-nowrap`}>{label}</th>;
                     return [
+                      th('✓', undefined, 'text-center'),
                       th(t.colVoucher,  'voucher_number'),
                       th(t.colCreated,  'created_at'),
                       th(t.colTourDate, 'tour_date'),
@@ -206,10 +220,18 @@ const VouchersPage: React.FC = () => {
                   <tr
                     key={v.id}
                     className={[
-                      v.is_deleted ? 'bg-gray-50 opacity-60' : 'hover:bg-gray-50',
+                      v.is_deleted ? 'bg-gray-50 opacity-60' : '',
+                      v.is_served && !v.is_deleted ? 'opacity-40' : 'hover:bg-gray-50',
                       v.is_important && !v.is_deleted ? 'border-l-4 border-l-red-400' : '',
                     ].join(' ')}
                   >
+                    <td className="px-2 py-2 text-center">
+                      <button
+                        onClick={() => handleToggleServed(v.id)}
+                        title={v.is_served ? 'Снять отметку' : 'Отметить обслуженным'}
+                        className={`w-5 h-5 rounded border-2 flex items-center justify-center text-xs font-bold transition ${v.is_served ? 'bg-green-500 border-green-500 text-white' : 'border-gray-300 text-transparent hover:border-green-400'}`}
+                      >✓</button>
+                    </td>
                     <td className="px-3 py-2 font-medium text-blue-600 whitespace-nowrap">
                       <Link to={`/vouchers/${v.id}`}>{v.voucher_number}</Link>
                       {v.is_important && <span className="ml-1 text-red-500 text-xs">★</span>}
@@ -218,7 +240,7 @@ const VouchersPage: React.FC = () => {
                       {format(new Date(v.created_at), 'dd/MM/yy')}
                     </td>
                     <td className="px-3 py-2 text-gray-700 whitespace-nowrap">
-                      {format(new Date(v.tour_date), 'dd/MM/yy')}
+                      {format(new Date(v.tour_date.slice(0,10) + 'T12:00:00'), 'dd/MM/yy')}
                     </td>
                     <td className="px-3 py-2 text-gray-800">{v.client_name}</td>
                     <td className="px-3 py-2 text-gray-500">{v.client_phone}</td>
