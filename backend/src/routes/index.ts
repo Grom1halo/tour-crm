@@ -104,6 +104,7 @@ router.delete('/accounting/cashflow/:id', authenticate, authorize('admin', 'acco
 router.get('/accounting/operators', authenticate, authorize('admin', 'accountant'), accountingController.getOperatorReconciliation);
 router.post('/accounting/operators/pay', authenticate, authorize('admin', 'accountant'), accountingController.payOperatorVouchers);
 router.post('/accounting/operators/writeoff', authenticate, authorize('admin', 'accountant'), accountingController.writeOffOperatorDebt);
+router.post('/accounting/operators/close-period', authenticate, authorize('admin', 'accountant'), accountingController.closeOperatorPeriod);
 router.get('/accounting/employees', authenticate, authorize('admin', 'accountant'), accountingController.getEmployeeData);
 router.post('/accounting/employee-payments', authenticate, authorize('admin', 'accountant'), accountingController.addEmployeePayment);
 router.put('/accounting/employee-payments/:id', authenticate, authorize('admin', 'accountant'), accountingController.updateEmployeePayment);

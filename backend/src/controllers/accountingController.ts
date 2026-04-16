@@ -353,6 +353,29 @@ export const writeOffOperatorDebt = async (req: AuthRequest, res: Response) => {
   }
 };
 
+// ===== CLOSE HISTORICAL PERIOD (bulk mark operator_paid) =====
+
+export const closeOperatorPeriod = async (req: AuthRequest, res: Response) => {
+  const { beforeDate, currency, companyId } = req.body;
+  if (!beforeDate) return res.status(400).json({ error: 'beforeDate required' });
+  try {
+    let q = `UPDATE vouchers SET operator_paid = true
+             WHERE operator_paid = false
+               AND is_deleted = false
+               AND tour_date < $1`;
+    const params: any[] = [beforeDate];
+    let p = 2;
+    if (currency) { q += ` AND COALESCE(currency, 'THB') = $${p++}`; params.push(currency); }
+    if (companyId) { q += ` AND company_id = $${p++}`; params.push(companyId); }
+    q += ' RETURNING id';
+    const result = await pool.query(q, params);
+    res.json({ closed: result.rowCount, message: `Закрыто ваучеров: ${result.rowCount}` });
+  } catch (error) {
+    console.error('closeOperatorPeriod error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
 // ===== TAB 3: EMPLOYEES =====
 
 export const getEmployeeData = async (req: AuthRequest, res: Response) => {

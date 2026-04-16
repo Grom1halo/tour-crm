@@ -95,6 +95,13 @@ const AccountingPage: React.FC = () => {
   const [opPayCompany, setOpPayCompany] = useState<any>(null);
   const [opPayForm, setOpPayForm] = useState({ paymentDate: new Date().toISOString().split('T')[0], paymentMethod: '', notes: '', amount: '' });
 
+  // Close period modal
+  const [showClosePeriodModal, setShowClosePeriodModal] = useState(false);
+  const [closePeriodForm, setClosePeriodForm] = useState({
+    beforeDate: new Date().toISOString().split('T')[0],
+  });
+  const [closePeriodResult, setClosePeriodResult] = useState<number | null>(null);
+
   // Write-off modal
   const [showWriteOffModal, setShowWriteOffModal] = useState(false);
   const [writeOffCompany, setWriteOffCompany] = useState<any>(null);
@@ -335,6 +342,22 @@ const AccountingPage: React.FC = () => {
       api.getAccountingDashboard().then(r => setDashboardData(r.data)).catch(() => {});
     } catch (err) {
       alert('Ошибка сохранения');
+    }
+  };
+
+  const saveClosePeriod = async () => {
+    if (!closePeriodForm.beforeDate) { alert('Укажите дату'); return; }
+    if (!confirm(`Отметить все ваучеры до ${closePeriodForm.beforeDate} как "оплачено оператору"?\n\nЭто действие нельзя отменить автоматически.`)) return;
+    try {
+      const r = await api.closeOperatorPeriod({
+        beforeDate: closePeriodForm.beforeDate,
+        currency: operatorsCurrency || undefined,
+      });
+      setClosePeriodResult(r.data.closed);
+      loadData();
+      api.getAccountingDashboard().then(res => setDashboardData(res.data)).catch(() => {});
+    } catch {
+      alert('Ошибка');
     }
   };
 
@@ -721,6 +744,12 @@ const AccountingPage: React.FC = () => {
               >
                 {operatorsAllTime ? '🌐 За всё время' : '📅 За период'}
               </button>
+              <button
+                onClick={() => { setClosePeriodResult(null); setShowClosePeriodModal(true); }}
+                className="px-3 py-1.5 text-sm rounded-lg border border-purple-300 bg-purple-50 text-purple-700 hover:bg-purple-100 transition font-medium"
+              >
+                🗂 Закрыть исторический долг
+              </button>
             </div>
           </div>
           {operatorsAllTime && (
@@ -863,6 +892,48 @@ const AccountingPage: React.FC = () => {
               </tbody>
             </table>
           </div>
+
+          {/* Закрыть исторический долг — модал */}
+          {showClosePeriodModal && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+              <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-xl">
+                <h3 className="text-lg font-bold text-gray-800 mb-1">Закрыть исторический долг</h3>
+                <p className="text-sm text-gray-500 mb-4">
+                  Все ваучеры до указанной даты будут отмечены как <strong>«оплачено оператору»</strong>.
+                  {operatorsCurrency && <span className="ml-1">Валюта: <strong>{operatorsCurrency === 'THB' ? '🇹🇭 THB' : '🇻🇳 VND'}</strong></span>}
+                </p>
+                {closePeriodResult !== null ? (
+                  <div className="text-center py-6">
+                    <div className="text-4xl mb-2">✅</div>
+                    <div className="text-lg font-bold text-green-700">Закрыто ваучеров: {closePeriodResult}</div>
+                    <button onClick={() => { setShowClosePeriodModal(false); setClosePeriodResult(null); }}
+                      className={btnPrimary + ' mt-4'}>Готово</button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="space-y-3">
+                      <div>
+                        <label className={labelCls}>Закрыть долг до даты *</label>
+                        <input type="date" value={closePeriodForm.beforeDate}
+                          onChange={e => setClosePeriodForm(p => ({ ...p, beforeDate: e.target.value }))}
+                          className={inputCls} />
+                        <p className="text-xs text-gray-400 mt-1">
+                          Все ваучеры с датой тура раньше этой даты будут считаться оплаченными оператору
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex justify-end gap-2 mt-5">
+                      <button onClick={() => setShowClosePeriodModal(false)} className={btnSecondary}>Отмена</button>
+                      <button onClick={saveClosePeriod}
+                        className="px-4 py-1.5 bg-purple-600 text-white text-sm rounded-lg hover:bg-purple-700 transition">
+                        Закрыть период
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Списание долга — модал */}
           {showWriteOffModal && writeOffCompany && (

@@ -110,6 +110,7 @@ export const deleteAccountingEntry = (id: number) => api.delete(`/accounting/cas
 export const getOperatorReconciliation = (params?: any) => api.get('/accounting/operators', { params });
 export const payOperatorVouchers = (data: any) => api.post('/accounting/operators/pay', data);
 export const writeOffOperatorDebt = (data: any) => api.post('/accounting/operators/writeoff', data);
+export const closeOperatorPeriod = (data: any) => api.post('/accounting/operators/close-period', data);
 export const getEmployeeData = (params?: any) => api.get('/accounting/employees', { params });
 export const addEmployeePayment = (data: any) => api.post('/accounting/employee-payments', data);
 export const updateEmployeePayment = (id: number, data: any) => api.put(`/accounting/employee-payments/${id}`, data);
