@@ -171,7 +171,8 @@ const ToursPage: React.FC = () => {
   const filtered = [...tours]
     .filter(tour =>
       (tour.name.toLowerCase().includes(search.toLowerCase()) ||
-       (tour.article || '').toLowerCase().includes(search.toLowerCase())) &&
+       (tour.article || '').toLowerCase().includes(search.toLowerCase()) ||
+       (tour.company_name || '').toLowerCase().includes(search.toLowerCase())) &&
       (typeFilter === '' || tour.tour_type === typeFilter)
     )
     .sort((a, b) => {

@@ -273,6 +273,17 @@ export const updateVoucher = async (req: AuthRequest, res: Response) => {
         id,
       ]
     );
+    // Sync accounting_entries currency when voucher currency changes
+    if (currency) {
+      await client.query(`
+        UPDATE accounting_entries ae
+        SET currency = $1
+        FROM payments p
+        WHERE ae.payment_id = p.id AND p.voucher_id = $2
+          AND ae.currency != $1
+      `, [currency, id]);
+    }
+
     await client.query('COMMIT');
     res.json(result.rows[0]);
   } catch (error) {

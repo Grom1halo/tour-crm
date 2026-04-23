@@ -47,7 +47,7 @@ export const addPayment = async (req: AuthRequest, res: Response) => {
     // Auto-sync: create accounting_entries record for this payment
     try {
       const voucherInfo = await client.query(
-        `SELECT v.voucher_number, c.name as client_name
+        `SELECT v.voucher_number, COALESCE(v.currency, 'THB') as currency, c.name as client_name
          FROM vouchers v
          LEFT JOIN clients c ON v.client_id = c.id
          WHERE v.id = $1`,
@@ -55,30 +55,33 @@ export const addPayment = async (req: AuthRequest, res: Response) => {
       );
       const vInfo = voucherInfo.rows[0];
       const counterparty = vInfo ? `Ваучер ${vInfo.voucher_number}${vInfo.client_name ? ' — ' + vInfo.client_name : ''}` : `Ваучер #${voucherId}`;
+      const voucherCurrency = vInfo?.currency || 'THB';
+
+      // For "Депозит в компанию": use explicitly passed companyId if provided, else fall back to voucher's company
+      const depositTargetCompanyId = (effectiveMethod === 'Депозит в компанию' && companyId)
+        ? companyId
+        : voucherCompanyId;
 
       if (refund) {
-        // Возврат — расход (деньги уходят из кассы обратно клиенту)
         await client.query(
           `INSERT INTO accounting_entries
-             (entry_date, entry_type, payment_method, counterparty_name, amount, notes, source, payment_id, created_by)
-           VALUES ($1, 'expense', $2, $3, $4, $5, 'auto', $6, $7)`,
-          [paymentDate, effectiveMethod, `Возврат: ${counterparty}`, amount, notes || null, newPayment.id, user.id]
+             (entry_date, entry_type, payment_method, counterparty_name, amount, notes, source, payment_id, currency, created_by)
+           VALUES ($1, 'expense', $2, $3, $4, $5, 'auto', $6, $7, $8)`,
+          [paymentDate, effectiveMethod, `Возврат: ${counterparty}`, amount, notes || null, newPayment.id, voucherCurrency, user.id]
         );
       } else if (effectiveMethod === 'Депозит в компанию') {
-        // Депозит в компанию: приход в движение средств + запись оплаты оператору (требует подтверждения)
         await client.query(
           `INSERT INTO accounting_entries
-             (entry_date, entry_type, payment_method, counterparty_name, company_id, amount, notes, category, source, payment_id, requires_confirmation, created_by)
-           VALUES ($1, 'expense', $2, $3, $4, $5, $6, 'Депозит в компанию', 'auto', $7, true, $8)`,
-          [paymentDate, effectiveMethod, counterparty, voucherCompanyId, amount, notes || null, newPayment.id, user.id]
+             (entry_date, entry_type, payment_method, counterparty_name, company_id, amount, notes, category, source, payment_id, requires_confirmation, currency, created_by)
+           VALUES ($1, 'expense', $2, $3, $4, $5, $6, 'Депозит в компанию', 'auto', $7, true, $8, $9)`,
+          [paymentDate, effectiveMethod, counterparty, depositTargetCompanyId, amount, notes || null, newPayment.id, voucherCurrency, user.id]
         );
       } else {
-        // Обычный платёж — приход
         await client.query(
           `INSERT INTO accounting_entries
-             (entry_date, entry_type, payment_method, counterparty_name, amount, notes, source, payment_id, created_by)
-           VALUES ($1, 'income', $2, $3, $4, $5, 'auto', $6, $7)`,
-          [paymentDate, effectiveMethod, counterparty, amount, notes || null, newPayment.id, user.id]
+             (entry_date, entry_type, payment_method, counterparty_name, amount, notes, source, payment_id, currency, created_by)
+           VALUES ($1, 'income', $2, $3, $4, $5, 'auto', $6, $7, $8)`,
+          [paymentDate, effectiveMethod, counterparty, amount, notes || null, newPayment.id, voucherCurrency, user.id]
         );
       }
     } catch (syncErr) {
@@ -127,13 +130,25 @@ export const updatePayment = async (req: AuthRequest, res: Response) => {
     }
 
     const result = await client.query(
-      `UPDATE payments 
-       SET payment_date = $1, amount = $2, payment_method = $3, 
+      `UPDATE payments
+       SET payment_date = $1, amount = $2, payment_method = $3,
            company_id = $4, notes = $5, updated_at = CURRENT_TIMESTAMP
        WHERE id = $6
        RETURNING *`,
       [paymentDate, amount, paymentMethod, companyId, notes, id]
     );
+
+    // Sync currency on the linked accounting entry
+    await client.query(`
+      UPDATE accounting_entries ae
+      SET currency = COALESCE(v.currency, 'THB'),
+          entry_date = $1,
+          amount = $2,
+          payment_method = $3
+      FROM payments p
+      JOIN vouchers v ON p.voucher_id = v.id
+      WHERE ae.payment_id = p.id AND p.id = $4
+    `, [paymentDate, amount, paymentMethod, id]);
 
     await client.query('COMMIT');
     res.json(result.rows[0]);

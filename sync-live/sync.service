@@ -1,0 +1,17 @@
+[Unit]
+Description=Tour CRM Live Sync
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/tour-crm/sync-live
+ExecStart=/usr/bin/node sync.js
+Restart=always
+RestartSec=10
+EnvironmentFile=/opt/tour-crm/sync-live/.env
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

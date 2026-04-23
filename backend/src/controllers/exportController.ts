@@ -9,6 +9,15 @@ const LIGHT_GREEN = 'FFE8F5E9';
 const LIGHT_RED = 'FFFFF0F0';
 const YELLOW = 'FFFFF9C4';
 const WHITE = 'FFFFFFFF';
+const ORANGE_VND = 'FFFFF3E0';   // light orange — VND rows
+const TEAL_USD   = 'FFE0F7FA';   // light teal  — USD rows
+
+function rowBgForCurrency(cur: string, idx: number, isImportant: boolean): string {
+  if (isImportant) return YELLOW;
+  if (cur === 'VND') return ORANGE_VND;
+  if (cur === 'USD') return TEAL_USD;
+  return idx % 2 === 0 ? WHITE : LIGHT_BLUE;
+}
 
 function hdr(ws: ExcelJS.Worksheet, row: number, col: number, value: string) {
   const cell = ws.getCell(row, col);
@@ -88,6 +97,7 @@ export const exportDailyAccounting = async (req: AuthRequest, res: Response) => 
         v.total_sale, v.total_net, v.paid_to_agency, v.cash_on_tour,
         v.payment_status, v.hotel_name, v.room_number,
         v.remarks, v.is_important, v.cancellation_notes,
+        COALESCE(v.currency, 'THB') as currency,
         v.agent_commission_percentage, v.created_at as sale_date,
         c.name as client_name, c.phone as client_phone,
         co.name as company_name, COALESCE(t.name, v.tour_details) as tour_name,
@@ -132,6 +142,13 @@ export const exportDailyAccounting = async (req: AuthRequest, res: Response) => 
     const vouchers = vouchersRes.rows;
     const payments = paymentsRes.rows;
 
+    // Pre-compute payments total by currency (used in Sheet 2 header + Sheet 4 summary)
+    const payByCur: Record<string, number> = {};
+    payments.forEach((p: any) => {
+      const pc = p.currency || 'THB';
+      payByCur[pc] = (payByCur[pc] || 0) + Number(p.amount || 0);
+    });
+
     // ── BUILD EXCEL ──────────────────────────────────────────────
     const wb = new ExcelJS.Workbook();
     wb.creator = 'Tour Tour Phuket CRM';
@@ -147,15 +164,15 @@ export const exportDailyAccounting = async (req: AuthRequest, res: Response) => 
     const ws1 = wb.addWorksheet('Бухгалтерия');
     ws1.views = [{ state: 'frozen', ySplit: 4 }];
 
-    const COL_COUNT = 19;
-    ws1.mergeCells(`A1:S1`);
+    const COL_COUNT = 21;
+    ws1.mergeCells(`A1:U1`);
     const title1 = ws1.getCell('A1');
     title1.value = `БУХГАЛТЕРСКИЙ ОТЧЁТ — ${dateFormatted}`;
     title1.font = { name: 'Arial', bold: true, size: 14, color: { argb: BLUE_HEADER } };
     title1.alignment = { horizontal: 'center', vertical: 'middle' };
     ws1.getRow(1).height = 28;
 
-    ws1.mergeCells('A2:S2');
+    ws1.mergeCells('A2:U2');
     const sub1 = ws1.getCell('A2');
     sub1.value = `Сформировано: ${new Date().toLocaleString('ru-RU')} | Ваучеров: ${vouchers.length} | Пассажиров: ${vouchers.reduce((s, v) => s + Number(v.adults || 0) + Number(v.children || 0), 0)}`;
     sub1.font = { name: 'Arial', size: 9, italic: true, color: { argb: 'FF666666' } };
@@ -164,11 +181,11 @@ export const exportDailyAccounting = async (req: AuthRequest, res: Response) => 
     ws1.getRow(3).height = 4;
 
     const vHeaders = [
-      'Дата создания', 'Дата выезда', 'Компания', 'Тур',
+      'Дата создания', 'Дата выезда', 'Компания', 'Тур', 'Валюта',
       'Взр.', 'Дет.', 'Мл.',
       'Оплачено', 'Наличные',
       'Sale', 'Нетто', 'Профит',
-      'Агент (%)', 'Ком. агента', 'Профит−Аг.', 'Зарплата мен.',
+      'Агент (%)', 'Ком. агента', 'Профит−Аг.', 'Зарплата мен.', 'Чист. выручка',
       'Статус оплаты', 'Место оплаты', 'Примечание',
     ];
     vHeaders.forEach((h, i) => hdr(ws1, 4, i + 1, h));
@@ -180,7 +197,8 @@ export const exportDailyAccounting = async (req: AuthRequest, res: Response) => 
 
     vouchers.forEach((v, i) => {
       const r = 5 + i;
-      const bg = v.is_important ? YELLOW : (i % 2 === 0 ? WHITE : LIGHT_BLUE);
+      const cur = v.currency || 'THB';
+      const bg = rowBgForCurrency(cur, i, v.is_important);
       const statusBg = v.payment_status === 'paid' ? LIGHT_GREEN : v.payment_status === 'unpaid' ? LIGHT_RED : YELLOW;
 
       const profit = Number(v.total_sale || 0) - Number(v.total_net || 0);
@@ -195,11 +213,22 @@ export const exportDailyAccounting = async (req: AuthRequest, res: Response) => 
         ? `${statusLabel} (${fmt(v.last_payment_date)})`
         : statusLabel;
 
+      // Cols 1-4: dates, company, tour
       cell(ws1, r, 1, fmt(v.sale_date), bg);
       cell(ws1, r, 2, fmt(v.tour_date), bg);
       cell(ws1, r, 3, v.company_name || '—', bg);
       cell(ws1, r, 4, v.tour_name || '—', bg);
 
+      // Col 5: Currency — bold, centered
+      const curCell = ws1.getCell(r, 5);
+      curCell.value = cur;
+      curCell.font = { name: 'Arial', size: 10, bold: true,
+        color: { argb: cur === 'VND' ? 'FFE65100' : cur === 'USD' ? 'FF00695C' : 'FF1E3A5F' } };
+      curCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bg } };
+      curCell.alignment = { horizontal: 'center' };
+      curCell.border = { top: { style: 'hair' }, bottom: { style: 'hair' }, left: { style: 'hair' }, right: { style: 'hair' } };
+
+      // Cols 6-8: pax
       const mkCtr = (col: number, val: number) => {
         const c = ws1.getCell(r, col);
         c.value = val; c.font = { name: 'Arial', size: 10 };
@@ -207,55 +236,61 @@ export const exportDailyAccounting = async (req: AuthRequest, res: Response) => 
         if (bg) c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bg } };
         c.border = { top: { style: 'hair' }, bottom: { style: 'hair' }, left: { style: 'hair' }, right: { style: 'hair' } };
       };
-      mkCtr(5, Number(v.adults)); mkCtr(6, Number(v.children)); mkCtr(7, Number(v.infants));
+      mkCtr(6, Number(v.adults)); mkCtr(7, Number(v.children)); mkCtr(8, Number(v.infants));
 
-      money(ws1, r, 8, v.paid_to_agency, bg);
-      money(ws1, r, 9, v.cash_on_tour, bg);
-      money(ws1, r, 10, v.total_sale, bg, true);
-      money(ws1, r, 11, v.total_net, bg);
-      money(ws1, r, 12, profit, profit < 0 ? LIGHT_RED : bg, true);
-      cell(ws1, r, 13, v.agent_name ? `${v.agent_name} (${v.agent_commission_percentage}%)` : '—', bg);
-      money(ws1, r, 14, agentCommission, bg);
-      money(ws1, r, 15, profitAfterAgent, bg);
-      money(ws1, r, 16, managerPay, LIGHT_GREEN, true);
+      money(ws1, r,  9, v.paid_to_agency, bg);
+      money(ws1, r, 10, v.cash_on_tour, bg);
+      money(ws1, r, 11, v.total_sale, bg, true);
+      money(ws1, r, 12, v.total_net, bg);
+      money(ws1, r, 13, profit, profit < 0 ? LIGHT_RED : bg, true);
+      cell(ws1,  r, 14, v.agent_name ? `${v.agent_name} (${v.agent_commission_percentage}%)` : '—', bg);
+      money(ws1, r, 15, agentCommission, bg);
+      money(ws1, r, 16, profitAfterAgent, bg);
+      money(ws1, r, 17, managerPay, LIGHT_GREEN, true);
 
-      // Status with date
-      const sc = ws1.getCell(r, 17);
+      // Col 18: Net revenue = profitAfterAgent - managerPay
+      const netRevenue = profitAfterAgent - managerPay;
+      money(ws1, r, 18, netRevenue, netRevenue < 0 ? LIGHT_RED : LIGHT_GREEN, true);
+
+      // Col 19: Status with date
+      const sc = ws1.getCell(r, 19);
       sc.value = statusWithDate;
       sc.font = { name: 'Arial', size: 10, bold: true };
       sc.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: statusBg } };
       sc.alignment = { horizontal: 'center', wrapText: true };
       sc.border = { top: { style: 'hair' }, bottom: { style: 'hair' }, left: { style: 'hair' }, right: { style: 'hair' } };
 
-      cell(ws1, r, 18, v.payment_methods || '—', bg);
-      cell(ws1, r, 19, [v.remarks, v.cancellation_notes].filter(Boolean).join(' | ') || '', bg);
+      cell(ws1, r, 20, v.payment_methods || '—', bg);
+      cell(ws1, r, 21, [v.remarks, v.cancellation_notes].filter(Boolean).join(' | ') || '', bg);
     });
 
     // Totals row
     const tr1 = 5 + vouchers.length;
-    ws1.mergeCells(tr1, 1, tr1, 4);
+    ws1.mergeCells(tr1, 1, tr1, 5);
     const totalCell1 = ws1.getCell(tr1, 1);
     totalCell1.value = `ИТОГО: ${vouchers.length} ваучеров`;
     totalCell1.font = { name: 'Arial', bold: true, color: { argb: 'FFFFFFFF' }, size: 10 };
     totalCell1.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: BLUE_HEADER } };
     totalCell1.alignment = { horizontal: 'right' };
 
-    const moneyCols1 = [5,6,7,8,9,10,11,12,13,14,15,16];
+    // Pax cols (6,7,8) = integer; money cols 9–18
+    const moneyCols1 = [6,7,8,9,10,11,12,13,14,15,16,17,18];
     moneyCols1.forEach(col => {
       const c = ws1.getCell(tr1, col);
       c.value = { formula: `SUM(${ws1.getColumn(col).letter}5:${ws1.getColumn(col).letter}${tr1 - 1})` };
-      c.numFmt = col > 7 ? '#,##0' : '0';
+      c.numFmt = col <= 8 ? '0' : '#,##0';
       c.font = { name: 'Arial', bold: true, color: { argb: 'FFFFFFFF' }, size: 10 };
       c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: BLUE_HEADER } };
       c.alignment = { horizontal: 'right' };
     });
-    [17, 18, 19].forEach(col => {
+    [19, 20, 21].forEach(col => {
       const c = ws1.getCell(tr1, col);
       c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: BLUE_HEADER } };
     });
     ws1.getRow(tr1).height = 22;
 
-    [14, 12, 22, 28, 5, 5, 5, 13, 13, 13, 13, 13, 22, 13, 13, 13, 20, 18, 28].forEach((w, i) => {
+    // 21 cols: date, date, company, tour, currency, adl, chd, inf, paid, cash, sale, net, profit, agent%, agcomm, paa, mgpay, netrev, status, method, notes
+    [14, 12, 22, 28, 7, 5, 5, 5, 13, 13, 13, 13, 13, 22, 13, 13, 13, 13, 20, 18, 28].forEach((w, i) => {
       ws1.getColumn(i + 1).width = w;
     });
 
@@ -274,8 +309,10 @@ export const exportDailyAccounting = async (req: AuthRequest, res: Response) => 
 
     ws2.mergeCells('A2:J2');
     const sub2 = ws2.getCell('A2');
-    const totalPayments = payments.reduce((s, p) => s + Number(p.amount || 0), 0);
-    sub2.value = `Сформировано: ${new Date().toLocaleString('ru-RU')} | Платежей: ${payments.length} | Сумма: ${totalPayments.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+    const payTotalsStr = Object.entries(payByCur)
+      .map(([c, s]) => `${c}: ${(s as number).toLocaleString('ru-RU')}`)
+      .join(' | ');
+    sub2.value = `Сформировано: ${new Date().toLocaleString('ru-RU')} | Платежей: ${payments.length} | ${payTotalsStr}`;
     sub2.font = { name: 'Arial', size: 9, italic: true, color: { argb: 'FF666666' } };
     sub2.alignment = { horizontal: 'center' };
     ws2.getRow(2).height = 16;
@@ -332,24 +369,25 @@ export const exportDailyAccounting = async (req: AuthRequest, res: Response) => 
     ws3.getRow(1).height = 28;
     ws3.getRow(2).height = 4;
 
-    const salHeaders = ['Менеджер', 'Ваучеров', 'Sale', 'Профит', 'Ком. агентов', 'Профит−Аг.', 'Ставка %', 'Зарплата'];
+    // 9 cols — added "Валюта" after "Менеджер"
+    const salHeaders = ['Менеджер', 'Валюта', 'Ваучеров', 'Sale', 'Профит', 'Ком. агентов', 'Профит−Аг.', 'Ставка %', 'Зарплата'];
     salHeaders.forEach((h, i) => hdr(ws3, 3, i + 1, h));
     ws3.getRow(3).height = 32;
 
-    // Group by manager
-    const mgMap: Record<number, any> = {};
+    // Group by (manager_id, currency) — never mix THB and VND in one row
+    const mgMap: Record<string, any> = {};
     vouchers.forEach(v => {
-      const mid = v.manager_id;
-      if (!mgMap[mid]) {
-        mgMap[mid] = {
-          name: v.manager_name,
-          count: 0,
-          sale: 0, profit: 0, agentCommission: 0,
+      const cur = v.currency || 'THB';
+      const key = `${v.manager_id}__${cur}`;
+      if (!mgMap[key]) {
+        mgMap[key] = {
+          name: v.manager_name, currency: cur,
+          count: 0, sale: 0, profit: 0, agentCommission: 0,
           profitAfterAgent: 0, managerPay: 0,
           pct: Number(v.manager_commission_percentage || 0),
         };
       }
-      const m = mgMap[mid];
+      const m = mgMap[key];
       const profit = Number(v.total_sale || 0) - Number(v.total_net || 0);
       const agentPct = v.agent_name ? Number(v.agent_commission_percentage || 0) / 100 : 0;
       const agentComm = Math.round(profit * agentPct);
@@ -362,29 +400,39 @@ export const exportDailyAccounting = async (req: AuthRequest, res: Response) => 
       m.managerPay += Math.round(paa * m.pct / 100);
     });
 
-    const mgList = Object.values(mgMap).sort((a: any, b: any) => b.managerPay - a.managerPay);
+    const mgList = Object.values(mgMap).sort((a: any, b: any) =>
+      a.currency.localeCompare(b.currency) || b.managerPay - a.managerPay
+    );
     mgList.forEach((m: any, i: number) => {
       const r = 4 + i;
-      const bg = i % 2 === 0 ? WHITE : LIGHT_BLUE;
+      const bg = rowBgForCurrency(m.currency, i, false);
       cell(ws3, r, 1, m.name, bg, true);
-      const cn = ws3.getCell(r, 2); cn.value = m.count; cn.font = { name: 'Arial', size: 10 }; cn.alignment = { horizontal: 'center' }; if (bg) cn.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bg } };
-      money(ws3, r, 3, m.sale, bg);
-      money(ws3, r, 4, m.profit, bg);
-      money(ws3, r, 5, m.agentCommission, bg);
-      money(ws3, r, 6, m.profitAfterAgent, bg);
-      const cp = ws3.getCell(r, 7); cp.value = m.pct + '%'; cp.font = { name: 'Arial', size: 10 }; cp.alignment = { horizontal: 'center' }; if (bg) cp.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bg } };
-      money(ws3, r, 8, m.managerPay, LIGHT_GREEN, true);
+      // Col 2: currency badge
+      const cc = ws3.getCell(r, 2);
+      cc.value = m.currency;
+      cc.font = { name: 'Arial', size: 10, bold: true,
+        color: { argb: m.currency === 'VND' ? 'FFE65100' : m.currency === 'USD' ? 'FF00695C' : 'FF1E3A5F' } };
+      cc.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bg } };
+      cc.alignment = { horizontal: 'center' };
+      cc.border = { top: { style: 'hair' }, bottom: { style: 'hair' }, left: { style: 'hair' }, right: { style: 'hair' } };
+      const cn = ws3.getCell(r, 3); cn.value = m.count; cn.font = { name: 'Arial', size: 10 }; cn.alignment = { horizontal: 'center' }; if (bg) cn.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bg } };
+      money(ws3, r, 4, m.sale, bg);
+      money(ws3, r, 5, m.profit, bg);
+      money(ws3, r, 6, m.agentCommission, bg);
+      money(ws3, r, 7, m.profitAfterAgent, bg);
+      const cp = ws3.getCell(r, 8); cp.value = m.pct + '%'; cp.font = { name: 'Arial', size: 10 }; cp.alignment = { horizontal: 'center' }; if (bg) cp.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bg } };
+      money(ws3, r, 9, m.managerPay, LIGHT_GREEN, true);
     });
 
-    // Grand total row
+    // Grand total row — note: sums mix currencies, just for reference
     const tr3 = 4 + mgList.length;
-    ws3.mergeCells(tr3, 1, tr3, 2);
+    ws3.mergeCells(tr3, 1, tr3, 3);
     const gt3 = ws3.getCell(tr3, 1);
-    gt3.value = 'ИТОГО';
+    gt3.value = 'ИТОГО (⚠ валюты раздельно выше)';
     gt3.font = { name: 'Arial', bold: true, color: { argb: 'FFFFFFFF' }, size: 10 };
     gt3.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: BLUE_HEADER } };
     gt3.alignment = { horizontal: 'right' };
-    [3,4,5,6,7,8].forEach(col => {
+    [4,5,6,7,8,9].forEach(col => {
       const c = ws3.getCell(tr3, col);
       c.value = { formula: `SUM(${ws3.getColumn(col).letter}4:${ws3.getColumn(col).letter}${tr3 - 1})` };
       c.numFmt = '#,##0';
@@ -393,7 +441,7 @@ export const exportDailyAccounting = async (req: AuthRequest, res: Response) => 
       c.alignment = { horizontal: 'right' };
     });
     ws3.getRow(tr3).height = 22;
-    [24, 10, 14, 14, 14, 14, 10, 16].forEach((w, i) => { ws3.getColumn(i + 1).width = w; });
+    [24, 8, 10, 14, 14, 14, 14, 10, 16].forEach((w, i) => { ws3.getColumn(i + 1).width = w; });
 
     // ═══════════════════════════════════════════════
     // SHEET 4: SUMMARY
@@ -407,31 +455,46 @@ export const exportDailyAccounting = async (req: AuthRequest, res: Response) => 
     ts.alignment = { horizontal: 'center', vertical: 'middle' };
     ws4.getRow(1).height = 36;
 
-    const totalSale = vouchers.reduce((s, v) => s + Number(v.total_sale || 0), 0);
-    const totalNet = vouchers.reduce((s, v) => s + Number(v.total_net || 0), 0);
-    const totalPaid = vouchers.reduce((s, v) => s + Number(v.paid_to_agency || 0), 0);
-    const totalCash = vouchers.reduce((s, v) => s + Number(v.cash_on_tour || 0), 0);
-    const totalPax = vouchers.reduce((s, v) => s + Number(v.adults || 0) + Number(v.children || 0), 0);
+    const totalPax = vouchers.reduce((s: number, v: any) => s + Number(v.adults || 0) + Number(v.children || 0), 0);
+
+    // Group financial totals by currency
+    const finByCur: Record<string, { sale: number; net: number; paid: number; cash: number; count: number }> = {};
+    vouchers.forEach((v: any) => {
+      const c = v.currency || 'THB';
+      if (!finByCur[c]) finByCur[c] = { sale: 0, net: 0, paid: 0, cash: 0, count: 0 };
+      finByCur[c].sale += Number(v.total_sale || 0);
+      finByCur[c].net  += Number(v.total_net  || 0);
+      finByCur[c].paid += Number(v.paid_to_agency || 0);
+      finByCur[c].cash += Number(v.cash_on_tour   || 0);
+      finByCur[c].count++;
+    });
+    const CUR_SYM: Record<string, string> = { THB: '฿', VND: '₫', USD: '$' };
 
     const summaryRows: [string, any, boolean?][] = [
       ['', '', true],
       ['ВАУЧЕРЫ', '', true],
       ['Всего ваучеров', vouchers.length],
       ['Пассажиров (взр+дет)', totalPax],
-      ['Оплачено', vouchers.filter(v => v.payment_status === 'paid').length],
-      ['Частично оплачено', vouchers.filter(v => v.payment_status === 'partial').length],
-      ['Не оплачено', vouchers.filter(v => v.payment_status === 'unpaid').length],
+      ['Оплачено', vouchers.filter((v: any) => v.payment_status === 'paid').length],
+      ['Частично оплачено', vouchers.filter((v: any) => v.payment_status === 'partial').length],
+      ['Не оплачено', vouchers.filter((v: any) => v.payment_status === 'unpaid').length],
+      ...Object.entries(finByCur).flatMap(([cur, f]) => {
+        const sym = CUR_SYM[cur] || cur;
+        return [
+          ['', '', true] as [string, any, boolean?],
+          [`ФИНАНСЫ — ${sym} ${cur}`, '', true] as [string, any, boolean?],
+          [`Ваучеров (${cur})`, f.count] as [string, any],
+          [`Продажи (${sym})`, f.sale] as [string, any],
+          [`Нетто (${sym})`, f.net] as [string, any],
+          [`Прибыль (${sym})`, f.sale - f.net] as [string, any],
+          [`Оплачено агентству (${sym})`, f.paid] as [string, any],
+          [`Наличные в туре (${sym})`, f.cash] as [string, any],
+        ];
+      }),
       ['', '', true],
-      ['ФИНАНСЫ', '', true],
-      ['Продажи (Sale)', totalSale],
-      ['Нетто (Net)', totalNet],
-      ['Прибыль (Sale − Net)', totalSale - totalNet],
-      ['Оплачено агентству', totalPaid],
-      ['Наличные в туре', totalCash],
-      ['', '', true],
-      ['ПЛАТЕЖИ ЗА ДЕНЬ', '', true],
+      ['ПЛАТЕЖИ', '', true],
       ['Количество платежей', payments.length],
-      ['Сумма платежей', totalPayments],
+      ...Object.entries(payByCur).map(([c, s]) => [`Сумма платежей ${c}`, s] as [string, any]),
     ];
 
     let sRow = 2;
@@ -468,6 +531,190 @@ export const exportDailyAccounting = async (req: AuthRequest, res: Response) => 
 
     ws4.getColumn(1).width = 30;
     ws4.getColumn(2).width = 20;
+
+    // ═══════════════════════════════════════════════
+    // SHEET 5: ДВИЖЕНИЕ СРЕДСТВ (без списаний, по валютам)
+    // ═══════════════════════════════════════════════
+    const cfRes = await pool.query(
+      `SELECT ae.entry_date, ae.entry_type, ae.payment_method,
+              ae.counterparty_name, ae.category, ae.amount,
+              COALESCE(ae.currency, 'THB') AS currency,
+              ae.notes
+       FROM accounting_entries ae
+       WHERE ae.entry_date >= $1 AND ae.entry_date <= $2
+         AND ae.category NOT IN ('Списание долга', 'Списание долга агенту')
+       ORDER BY ae.currency, ae.entry_date ASC, ae.created_at ASC`,
+      [dateFrom, dateTo || dateFrom]
+    );
+    const cfRows = cfRes.rows;
+
+    const ws5 = wb.addWorksheet('Движение средств');
+    const cfCols = ['Дата', 'Тип', 'Категория', 'Контрагент', 'Метод оплаты', 'Приход', 'Расход', 'Валюта', 'Примечание'];
+    const cfWidths = [12, 10, 22, 30, 20, 14, 14, 8, 40];
+
+    let cf5r = 1;
+    const CF_CURRENCIES = ['THB', 'USD', 'VND'];
+    const CF_SYM: Record<string, string> = { THB: '฿', USD: '$', VND: '₫' };
+    const CF_BG: Record<string, string> = { THB: WHITE, USD: TEAL_USD, VND: ORANGE_VND };
+
+    for (const cur of CF_CURRENCIES) {
+      const rows = cfRows.filter((r: any) => r.currency === cur);
+      if (rows.length === 0) continue;
+
+      // Currency header
+      ws5.mergeCells(cf5r, 1, cf5r, cfCols.length);
+      const chCell = ws5.getCell(cf5r, 1);
+      chCell.value = `${cur}  ${CF_SYM[cur]}`;
+      chCell.font = { name: 'Arial', bold: true, size: 12, color: { argb: 'FFFFFFFF' } };
+      chCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: BLUE_HEADER } };
+      chCell.alignment = { horizontal: 'center', vertical: 'middle' };
+      ws5.getRow(cf5r).height = 24;
+      cf5r++;
+
+      // Column headers
+      cfCols.forEach((h, i) => hdr(ws5, cf5r, i + 1, h));
+      ws5.getRow(cf5r).height = 20;
+      cf5r++;
+
+      let totalIncome = 0, totalExpense = 0;
+      rows.forEach((r: any, idx: number) => {
+        const bg = CF_BG[cur];
+        const rowBg = idx % 2 === 0 ? bg : LIGHT_BLUE;
+        const isIncome = r.entry_type === 'income';
+        const amt = Number(r.amount);
+        if (isIncome) totalIncome += amt; else totalExpense += amt;
+
+        cell(ws5, cf5r, 1, new Date(r.entry_date).toLocaleDateString('ru-RU'), rowBg);
+        cell(ws5, cf5r, 2, isIncome ? 'Приход' : 'Расход', rowBg);
+        cell(ws5, cf5r, 3, r.category || '—', rowBg);
+        cell(ws5, cf5r, 4, r.counterparty_name || '—', rowBg);
+        cell(ws5, cf5r, 5, r.payment_method || '—', rowBg);
+        money(ws5, cf5r, 6, isIncome ? amt : '', rowBg);
+        money(ws5, cf5r, 7, !isIncome ? amt : '', rowBg);
+        cell(ws5, cf5r, 8, cur, rowBg);
+        cell(ws5, cf5r, 9, r.notes || '', rowBg);
+        cf5r++;
+      });
+
+      // Totals row
+      const totBg = 'FFDCE6F1';
+      cell(ws5, cf5r, 1, 'ИТОГО', totBg, true);
+      cell(ws5, cf5r, 2, '', totBg);
+      cell(ws5, cf5r, 3, '', totBg);
+      cell(ws5, cf5r, 4, '', totBg);
+      cell(ws5, cf5r, 5, `Баланс: ${(totalIncome - totalExpense).toLocaleString('ru-RU')} ${CF_SYM[cur]}`, totBg, true);
+      money(ws5, cf5r, 6, totalIncome, totBg, true);
+      money(ws5, cf5r, 7, totalExpense, totBg, true);
+      cell(ws5, cf5r, 8, cur, totBg, true);
+      cell(ws5, cf5r, 9, '', totBg);
+      ws5.getRow(cf5r).height = 22;
+      cf5r += 2; // blank row between currencies
+    }
+
+    cfWidths.forEach((w, i) => { ws5.getColumn(i + 1).width = w; });
+
+    // ═══════════════════════════════════════════════
+    // SHEET 6: ОПЕРАТОРЫ (баланс без списаний)
+    // ═══════════════════════════════════════════════
+    const opRes = await pool.query(
+      `SELECT
+         c.name AS company_name,
+         COALESCE(SUM(CASE WHEN v.is_deleted = false THEN v.total_net ELSE 0 END), 0) AS total_owed,
+         COALESCE(SUM(CASE WHEN v.is_deleted = false THEN COALESCE(v.cash_on_tour, 0) ELSE 0 END), 0) AS total_cash,
+         COALESCE((
+           SELECT SUM(ae2.amount) FROM accounting_entries ae2
+           WHERE ae2.company_id = c.id AND ae2.entry_type = 'expense'
+             AND ae2.category NOT IN ('Списание долга')
+         ), 0) AS total_sent
+       FROM companies c
+       LEFT JOIN vouchers v ON v.company_id = c.id AND v.is_deleted = false
+       WHERE c.is_active = true
+       GROUP BY c.id, c.name
+       HAVING COUNT(v.id) > 0
+       ORDER BY c.name`
+    );
+
+    const ws6 = wb.addWorksheet('Операторы');
+    ws6.mergeCells('A1:E1');
+    const op6t = ws6.getCell('A1');
+    op6t.value = `ОПЕРАТОРЫ — расчёты (${dateFrom} — ${dateTo || dateFrom})`;
+    op6t.font = { name: 'Arial', bold: true, size: 13, color: { argb: BLUE_HEADER } };
+    op6t.alignment = { horizontal: 'center', vertical: 'middle' };
+    ws6.getRow(1).height = 30;
+
+    const opHdrs = ['Компания', 'Нетто (к оплате)', 'Кэш на туре', 'Отправлено', 'Баланс'];
+    opHdrs.forEach((h, i) => hdr(ws6, 2, i + 1, h));
+    ws6.getRow(2).height = 20;
+
+    let op6r = 3;
+    opRes.rows.forEach((r: any, idx: number) => {
+      const owed = Number(r.total_owed);
+      const cash = Number(r.total_cash);
+      const sent = Number(r.total_sent);
+      const balance = sent + cash - owed;
+      const bg = balance >= 0 ? LIGHT_GREEN : (idx % 2 === 0 ? WHITE : LIGHT_BLUE);
+      cell(ws6, op6r, 1, r.company_name, bg, true);
+      money(ws6, op6r, 2, owed, bg);
+      money(ws6, op6r, 3, cash, bg);
+      money(ws6, op6r, 4, sent, bg);
+      money(ws6, op6r, 5, balance, bg, true);
+      ws6.getCell(op6r, 5).font = { name: 'Arial', size: 10, bold: true, color: { argb: balance >= 0 ? 'FF1B6B3A' : 'FF9B0000' } };
+      op6r++;
+    });
+
+    [30, 16, 16, 16, 16].forEach((w, i) => { ws6.getColumn(i + 1).width = w; });
+
+    // ═══════════════════════════════════════════════
+    // SHEET 7: АГЕНТЫ (комиссии без списаний)
+    // ═══════════════════════════════════════════════
+    const agRes = await pool.query(
+      `SELECT
+         a.name AS agent_name,
+         COALESCE(SUM(
+           CASE WHEN v.is_deleted = false AND v.agent_commission_percentage > 0
+             THEN ROUND((v.total_sale - v.total_net) * v.agent_commission_percentage / 100.0)
+             ELSE 0 END
+         ), 0) AS total_commission_owed,
+         COALESCE((
+           SELECT SUM(ae2.amount) FROM accounting_entries ae2
+           WHERE ae2.agent_id = a.id AND ae2.entry_type = 'expense'
+             AND ae2.category NOT IN ('Списание долга агенту')
+         ), 0) AS total_paid
+       FROM agents a
+       LEFT JOIN vouchers v ON v.agent_id = a.id
+       WHERE a.is_active = true
+       GROUP BY a.id, a.name
+       HAVING COUNT(v.id) > 0
+       ORDER BY a.name`
+    );
+
+    const ws7 = wb.addWorksheet('Агенты');
+    ws7.mergeCells('A1:D1');
+    const ag7t = ws7.getCell('A1');
+    ag7t.value = `АГЕНТЫ — комиссии (${dateFrom} — ${dateTo || dateFrom})`;
+    ag7t.font = { name: 'Arial', bold: true, size: 13, color: { argb: BLUE_HEADER } };
+    ag7t.alignment = { horizontal: 'center', vertical: 'middle' };
+    ws7.getRow(1).height = 30;
+
+    const agHdrs = ['Агент', 'Начислено', 'Выплачено', 'Баланс'];
+    agHdrs.forEach((h, i) => hdr(ws7, 2, i + 1, h));
+    ws7.getRow(2).height = 20;
+
+    let ag7r = 3;
+    agRes.rows.forEach((r: any, idx: number) => {
+      const owed = Number(r.total_commission_owed);
+      const paid = Number(r.total_paid);
+      const balance = paid - owed;
+      const bg = balance >= 0 ? LIGHT_GREEN : (idx % 2 === 0 ? WHITE : LIGHT_BLUE);
+      cell(ws7, ag7r, 1, r.agent_name, bg, true);
+      money(ws7, ag7r, 2, owed, bg);
+      money(ws7, ag7r, 3, paid, bg);
+      money(ws7, ag7r, 4, balance, bg, true);
+      ws7.getCell(ag7r, 4).font = { name: 'Arial', size: 10, bold: true, color: { argb: balance >= 0 ? 'FF1B6B3A' : 'FF9B0000' } };
+      ag7r++;
+    });
+
+    [30, 16, 16, 16].forEach((w, i) => { ws7.getColumn(i + 1).width = w; });
 
     // ── STREAM RESPONSE ──
     const filename = dateFrom === dateTo
@@ -1482,11 +1729,13 @@ export const exportFullReport = async (req: AuthRequest, res: Response) => {
 // ── ACCOUNTING EXPORT ─────────────────────────────────────────────────────────
 export const exportAccountingReport = async (req: AuthRequest, res: Response) => {
   try {
-    const { dateFrom: dfParam, dateTo: dtParam, managerId, dateType = 'sale' } = req.query;
+    const { dateFrom: dfParam, dateTo: dtParam, managerId, dateType = 'sale', currency: curParam } = req.query;
     const user = req.user!;
     const dateFrom = dfParam ? String(dfParam) : null;
     const dateTo   = dtParam ? String(dtParam) : dateFrom;
     if (!dateFrom) return res.status(400).json({ error: 'dateFrom required' });
+    // If currency is specified — export only that currency; otherwise export all three
+    const filterCurrency = curParam ? String(curParam).toUpperCase() : null;
 
     const dateField = dateType === 'tour' ? 'v.tour_date::date' : 'v.created_at::date';
 
@@ -1505,7 +1754,7 @@ export const exportAccountingReport = async (req: AuthRequest, res: Response) =>
       mgrFilter = ` AND v.manager_id = $${p++}`; params.push(managerId);
     }
 
-    const [detailRes, cashflowRes, operatorsRes, employeesRes] = await Promise.all([
+    const [detailRes, cashflowRes, operatorsRes, employeesRes, agentsRes] = await Promise.all([
       // Бух. отчёт
       pool.query(`
         SELECT
@@ -1527,14 +1776,15 @@ export const exportAccountingReport = async (req: AuthRequest, res: Response) =>
         LEFT JOIN tours t ON v.tour_id = t.id
         LEFT JOIN users u ON v.manager_id = u.id
         LEFT JOIN agents a ON v.agent_id = a.id
-        WHERE v.is_deleted = false${dateFilter}${mgrFilter}
+        WHERE v.is_deleted = false${dateFilter}${mgrFilter}${filterCurrency ? ` AND COALESCE(v.currency, 'THB') = '${filterCurrency}'` : ''}
         ORDER BY v.created_at ASC
       `, params),
 
-      // Движение средств
+      // Движение средств (без списаний, с валютой)
       pool.query(`
         SELECT ae.id, ae.entry_date, ae.entry_type, ae.category, ae.amount,
           ae.payment_method, ae.counterparty_name, ae.notes, ae.invoice_number, ae.source,
+          COALESCE(ae.currency, 'THB') AS currency,
           c.name AS company_name,
           v.voucher_number AS linked_voucher_number
         FROM accounting_entries ae
@@ -1542,21 +1792,27 @@ export const exportAccountingReport = async (req: AuthRequest, res: Response) =>
         LEFT JOIN payments p ON ae.payment_id = p.id
         LEFT JOIN vouchers v ON p.voucher_id = v.id
         WHERE ae.entry_date >= $1 AND ae.entry_date <= $2
-        ORDER BY ae.entry_date ASC, ae.created_at ASC
+          AND ae.category NOT IN ('Списание долга', 'Списание долга агенту')
+          ${filterCurrency ? `AND COALESCE(ae.currency, 'THB') = '${filterCurrency}'` : ''}
+        ORDER BY ae.currency, ae.entry_date ASC, ae.created_at ASC
       `, [dateFrom, dateTo || dateFrom]),
 
-      // Туроператоры
+      // Туроператоры — сгруппированы по валюте (total_sent без списаний)
       pool.query(`
+        WITH sent_by_cur AS (
+          SELECT company_id, COALESCE(currency, 'THB') AS currency, SUM(amount) AS total_sent
+          FROM accounting_entries
+          WHERE entry_type = 'expense'
+            AND category NOT IN ('Списание долга')
+          GROUP BY company_id, COALESCE(currency, 'THB')
+        )
         SELECT c.id AS company_id, c.name AS company_name,
+          COALESCE(v.currency, 'THB') AS currency,
           COALESCE(SUM(CASE
             WHEN v.is_deleted = false
               AND v.tour_date::date >= $1::date AND v.tour_date::date <= $2::date
             THEN v.total_net END), 0) AS total_owed_to_operator,
-          COALESCE((
-            SELECT SUM(ae2.amount) FROM accounting_entries ae2
-            WHERE ae2.company_id = c.id AND ae2.entry_type = 'expense'
-              AND ae2.entry_date >= $1::date AND ae2.entry_date <= $2::date
-          ), 0) AS total_sent_to_operator,
+          COALESCE(s.total_sent, 0) AS total_sent_to_operator,
           COUNT(DISTINCT CASE
             WHEN v.is_deleted = false
               AND v.tour_date::date >= $1::date AND v.tour_date::date <= $2::date
@@ -1571,10 +1827,13 @@ export const exportAccountingReport = async (req: AuthRequest, res: Response) =>
           ), '[]') AS vouchers
         FROM companies c
         LEFT JOIN vouchers v ON v.company_id = c.id
+        LEFT JOIN sent_by_cur s ON s.company_id = c.id
+          AND s.currency = COALESCE(v.currency, 'THB')
         WHERE c.is_active = true
-        GROUP BY c.id, c.name
+          ${filterCurrency ? `AND COALESCE(v.currency, 'THB') = '${filterCurrency}'` : ''}
+        GROUP BY c.id, c.name, COALESCE(v.currency, 'THB'), s.total_sent
         HAVING COUNT(DISTINCT CASE WHEN v.is_deleted = false AND v.tour_date::date >= $1::date AND v.tour_date::date <= $2::date THEN v.id END) > 0
-        ORDER BY c.name
+        ORDER BY COALESCE(v.currency, 'THB'), c.name
       `, [dateFrom, dateTo || dateFrom]),
 
       // Сотрудники
@@ -1605,6 +1864,41 @@ export const exportAccountingReport = async (req: AuthRequest, res: Response) =>
         GROUP BY u.id, u.full_name, u.role, u.commission_percentage
         ORDER BY u.full_name
       `, [dateFrom, dateTo || dateFrom]),
+
+      // Агенты — сгруппированы по валюте (без списаний)
+      pool.query(`
+        WITH agent_paid_by_cur AS (
+          SELECT agent_id, COALESCE(currency, 'THB') AS currency, SUM(amount) AS total_paid
+          FROM accounting_entries
+          WHERE entry_type = 'expense'
+            AND agent_id IS NOT NULL
+            AND category NOT IN ('Списание долга агенту')
+          GROUP BY agent_id, COALESCE(currency, 'THB')
+        )
+        SELECT a.name AS agent_name,
+          COALESCE(v.currency, 'THB') AS currency,
+          COALESCE(SUM(
+            CASE WHEN v.is_deleted = false AND v.agent_commission_percentage > 0
+              AND v.tour_date::date >= $1::date AND v.tour_date::date <= $2::date
+            THEN ROUND((v.total_sale - v.total_net) * v.agent_commission_percentage / 100.0)
+            ELSE 0 END
+          ), 0) AS commission_period,
+          COALESCE(SUM(
+            CASE WHEN v.is_deleted = false AND v.agent_commission_percentage > 0
+            THEN ROUND((v.total_sale - v.total_net) * v.agent_commission_percentage / 100.0)
+            ELSE 0 END
+          ), 0) AS commission_total,
+          COALESCE(ap.total_paid, 0) AS total_paid
+        FROM agents a
+        LEFT JOIN vouchers v ON v.agent_id = a.id
+        LEFT JOIN agent_paid_by_cur ap ON ap.agent_id = a.id
+          AND ap.currency = COALESCE(v.currency, 'THB')
+        WHERE a.is_active = true
+          ${filterCurrency ? `AND COALESCE(v.currency, 'THB') = '${filterCurrency}'` : ''}
+        GROUP BY a.id, a.name, COALESCE(v.currency, 'THB'), ap.total_paid
+        HAVING SUM(CASE WHEN v.is_deleted = false AND v.agent_commission_percentage > 0 THEN 1 ELSE 0 END) > 0
+        ORDER BY COALESCE(v.currency, 'THB'), a.name
+      `, [dateFrom, dateTo || dateFrom]),
     ]);
 
     const rows      = detailRes.rows;
@@ -1614,6 +1908,7 @@ export const exportAccountingReport = async (req: AuthRequest, res: Response) =>
       balance: parseFloat(r.total_sent_to_operator) - parseFloat(r.total_owed_to_operator),
     }));
     const employees = employeesRes.rows;
+    const agents    = agentsRes.rows;
 
     const dateFormatted = dateFrom === (dateTo || dateFrom)
       ? new Date(dateFrom).toLocaleDateString('ru-RU')
@@ -1742,141 +2037,197 @@ export const exportAccountingReport = async (req: AuthRequest, res: Response) =>
 
     for (let i = 5; i < tR; i++) ws.getRow(i).height = 20;
 
-    // ── SHEET 2: ДВИЖЕНИЕ СРЕДСТВ ───────────────────────────
+    // ── SHEET 2: ДВИЖЕНИЕ СРЕДСТВ (по валютам, без списаний) ─
     {
       const wsCF = wb.addWorksheet('Движение средств');
-      wsCF.views = [{ state: 'frozen', ySplit: 4 }];
-      const cfCols = 8;
-      const cfLetter = wsCF.getColumn(cfCols).letter;
-      wsCF.mergeCells(`A1:${cfLetter}1`);
+      wsCF.views = [{ state: 'frozen', ySplit: 2 }];
+      wsCF.mergeCells('A1:H1');
       const cfTitle = wsCF.getCell('A1');
-      cfTitle.value = `ДВИЖЕНИЕ СРЕДСТВ — ${dateFormatted}`;
+      cfTitle.value = `ДВИЖЕНИЕ СРЕДСТВ — ${dateFormatted} (без списаний долга)`;
       cfTitle.font = { name: 'Arial', bold: true, size: 13, color: { argb: BLUE_HEADER } };
       cfTitle.alignment = { horizontal: 'center', vertical: 'middle' };
       wsCF.getRow(1).height = 26;
-      wsCF.mergeCells(`A2:${cfLetter}2`);
-      wsCF.getCell('A2').value = `Сформировано: ${new Date().toLocaleString('ru-RU')}`;
-      wsCF.getCell('A2').font = { name: 'Arial', size: 9, italic: true, color: { argb: 'FF666666' } };
-      wsCF.getCell('A2').alignment = { horizontal: 'center' };
-      wsCF.getRow(2).height = 14;
-      wsCF.getRow(3).height = 4;
 
-      ['Дата', 'Тип', 'Категория', 'Контрагент / Примечание', 'Метод', 'Приход', 'Расход', 'Остаток']
-        .forEach((h, i) => hdr(wsCF, 4, i + 1, h));
-      wsCF.getRow(4).height = 32;
+      const CF_CURRENCIES = ['THB', 'USD', 'VND'];
+      const CF_SYM: Record<string, string> = { THB: '฿', USD: '$', VND: '₫' };
+      const CF_BG: Record<string, string> = { THB: WHITE, USD: TEAL_USD, VND: ORANGE_VND };
+      const CF_HDR: Record<string, string> = { THB: '1E6E4B', USD: '1A5276', VND: '7D6608' };
 
-      let runBal = 0;
-      cashflow.forEach((e, i) => {
-        const r = 5 + i;
-        const isIncome = e.entry_type === 'income';
-        const amt = parseFloat(e.amount);
-        runBal += isIncome ? amt : -amt;
-        const bg = isIncome ? LIGHT_GREEN : LIGHT_RED;
+      let cfRow = 2;
 
-        const counterparty = [
-          e.counterparty_name || e.company_name,
-          e.linked_voucher_number ? `#${e.linked_voucher_number}` : '',
-          e.invoice_number ? `Сч:${e.invoice_number}` : '',
-          e.notes,
-        ].filter(Boolean).join(' · ');
+      for (const cur of CF_CURRENCIES) {
+        const entries = cashflow.filter((e: any) => (e.currency || 'THB') === cur);
 
-        cell(wsCF, r, 1, fmt(e.entry_date), bg);
-        cell(wsCF, r, 2, isIncome ? 'Приход' : 'Расход', bg, true);
-        cell(wsCF, r, 3, e.category || '—', bg);
-        cell(wsCF, r, 4, counterparty || '—', bg);
-        cell(wsCF, r, 5, e.payment_method || '—', bg);
-        money(wsCF, r, 6, isIncome ? amt : 0, bg, isIncome);
-        money(wsCF, r, 7, !isIncome ? amt : 0, bg, !isIncome);
-        money(wsCF, r, 8, runBal, runBal < 0 ? LIGHT_RED : LIGHT_GREEN, true);
-      });
+        // Currency section header — always shown
+        wsCF.mergeCells(cfRow, 1, cfRow, 8);
+        const secCell = wsCF.getCell(cfRow, 1);
+        secCell.value = `${cur}  ${CF_SYM[cur]}`;
+        secCell.font = { name: 'Arial', bold: true, size: 12, color: { argb: 'FFFFFFFF' } };
+        secCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${CF_HDR[cur]}` } };
+        secCell.alignment = { horizontal: 'center', vertical: 'middle' };
+        wsCF.getRow(cfRow).height = 22;
+        cfRow++;
 
-      const cfTR = 5 + cashflow.length;
-      wsCF.mergeCells(cfTR, 1, cfTR, 5);
-      const cfTc = wsCF.getCell(cfTR, 1);
-      cfTc.value = `ИТОГО: ${cashflow.length} записей`;
-      cfTc.font = { name: 'Arial', bold: true, color: { argb: 'FFFFFFFF' }, size: 10 };
-      cfTc.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: BLUE_HEADER } };
-      cfTc.alignment = { horizontal: 'right' };
-      [6, 7].forEach(col => {
-        const c = wsCF.getCell(cfTR, col);
-        c.value = { formula: `SUM(${wsCF.getColumn(col).letter}5:${wsCF.getColumn(col).letter}${cfTR - 1})` };
-        c.numFmt = '#,##0';
-        c.font = { name: 'Arial', bold: true, color: { argb: 'FFFFFFFF' }, size: 10 };
-        c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: BLUE_HEADER } };
-        c.alignment = { horizontal: 'right' };
-      });
-      wsCF.getCell(cfTR, 8).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: BLUE_HEADER } };
-      wsCF.getRow(cfTR).height = 22;
-      [11, 30, 18, 40, 16, 13, 13, 13].forEach((w, i) => { wsCF.getColumn(i + 1).width = w; });
-      for (let i = 5; i < cfTR; i++) wsCF.getRow(i).height = 18;
+        // Column headers
+        ['Дата', 'Тип', 'Категория', 'Контрагент / Примечание', 'Метод', 'Приход', 'Расход', 'Остаток']
+          .forEach((h, i) => hdr(wsCF, cfRow, i + 1, h));
+        wsCF.getRow(cfRow).height = 28;
+        cfRow++;
+
+        let runBal = 0;
+        let totalIncome = 0, totalExpense = 0;
+
+        if (entries.length === 0) {
+          // Empty section placeholder
+          wsCF.mergeCells(cfRow, 1, cfRow, 8);
+          const emptyCell = wsCF.getCell(cfRow, 1);
+          emptyCell.value = 'Нет записей за выбранный период';
+          emptyCell.font = { name: 'Arial', size: 10, italic: true, color: { argb: 'FF888888' } };
+          emptyCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF9F9F9' } };
+          emptyCell.alignment = { horizontal: 'center' };
+          wsCF.getRow(cfRow).height = 18;
+          cfRow++;
+        } else {
+          entries.forEach((e: any) => {
+            const isIncome = e.entry_type === 'income';
+            const amt = parseFloat(e.amount);
+            runBal += isIncome ? amt : -amt;
+            if (isIncome) totalIncome += amt; else totalExpense += amt;
+            const bg = isIncome ? LIGHT_GREEN : LIGHT_RED;
+            const counterparty = [
+              e.counterparty_name || e.company_name,
+              e.linked_voucher_number ? `#${e.linked_voucher_number}` : '',
+              e.notes,
+            ].filter(Boolean).join(' · ');
+            cell(wsCF, cfRow, 1, fmt(e.entry_date), bg);
+            cell(wsCF, cfRow, 2, isIncome ? 'Приход' : 'Расход', bg, true);
+            cell(wsCF, cfRow, 3, e.category || '—', bg);
+            cell(wsCF, cfRow, 4, counterparty || '—', bg);
+            cell(wsCF, cfRow, 5, e.payment_method || '—', bg);
+            money(wsCF, cfRow, 6, isIncome ? amt : 0, bg, isIncome);
+            money(wsCF, cfRow, 7, !isIncome ? amt : 0, bg, !isIncome);
+            money(wsCF, cfRow, 8, runBal, runBal < 0 ? LIGHT_RED : LIGHT_GREEN, true);
+            wsCF.getRow(cfRow).height = 18;
+            cfRow++;
+          });
+        }
+
+        // Totals row — always shown
+        wsCF.mergeCells(cfRow, 1, cfRow, 4);
+        const totCell = wsCF.getCell(cfRow, 1);
+        totCell.value = `ИТОГО ${cur}: ${entries.length} записей · Баланс: ${Math.round(totalIncome - totalExpense).toLocaleString('ru-RU')} ${CF_SYM[cur]}`;
+        totCell.font = { name: 'Arial', bold: true, color: { argb: 'FFFFFFFF' }, size: 10 };
+        totCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${CF_HDR[cur]}` } };
+        totCell.alignment = { horizontal: 'right', indent: 1 };
+        [5, 6, 7, 8].forEach(col => {
+          const c = wsCF.getCell(cfRow, col);
+          if (col === 6) c.value = totalIncome;
+          else if (col === 7) c.value = totalExpense;
+          else c.value = '';
+          c.numFmt = '#,##0';
+          c.font = { name: 'Arial', bold: true, color: { argb: 'FFFFFFFF' }, size: 10 };
+          c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${CF_HDR[cur]}` } };
+          c.alignment = { horizontal: 'right' };
+        });
+        wsCF.getRow(cfRow).height = 22;
+        cfRow += 2; // blank separator
+      }
+
+      [11, 12, 20, 42, 18, 14, 14, 14].forEach((w, i) => { wsCF.getColumn(i + 1).width = w; });
     }
 
-    // ── SHEET 3: ТУРОПЕРАТОРЫ ───────────────────────────────
+    // ── SHEET 3: ТУРОПЕРАТОРЫ (секции по валюте) ──────────────
     {
       const wsOP = wb.addWorksheet('Туроператоры');
-      wsOP.views = [{ state: 'frozen', ySplit: 4 }];
-      const opLetter = wsOP.getColumn(5).letter;
-      wsOP.mergeCells(`A1:${opLetter}1`);
+      wsOP.mergeCells('A1:E1');
       const opTitle = wsOP.getCell('A1');
       opTitle.value = `ТУРОПЕРАТОРЫ — ${dateFormatted}`;
       opTitle.font = { name: 'Arial', bold: true, size: 13, color: { argb: BLUE_HEADER } };
       opTitle.alignment = { horizontal: 'center', vertical: 'middle' };
       wsOP.getRow(1).height = 26;
-      wsOP.mergeCells(`A2:${opLetter}2`);
-      wsOP.getCell('A2').value = `Сформировано: ${new Date().toLocaleString('ru-RU')}`;
-      wsOP.getCell('A2').font = { name: 'Arial', size: 9, italic: true, color: { argb: 'FF666666' } };
-      wsOP.getCell('A2').alignment = { horizontal: 'center' };
-      wsOP.getRow(2).height = 14;
-      wsOP.getRow(3).height = 4;
-
-      ['Компания', 'Ваучеров', 'Нетто (к оплате)', 'Отправлено', 'Баланс']
-        .forEach((h, i) => hdr(wsOP, 4, i + 1, h));
-      wsOP.getRow(4).height = 32;
 
       const STATUS_OP: Record<string, string> = { paid: 'Оплачен', partial: 'Частично', unpaid: 'Не опл.' };
-      let opRow = 5;
+      const OP_SYM: Record<string, string> = { THB: '฿', USD: '$', VND: '₫' };
+      const OP_HDR: Record<string, string> = { THB: '1E6E4B', USD: '1A5276', VND: '7D6608' };
+      let opRow = 2;
 
-      operators.forEach(op => {
-        const balance = parseFloat(op.balance);
-        const opBg = balance > 0 ? LIGHT_GREEN : balance < 0 ? LIGHT_RED : WHITE;
+      for (const cur of ['THB', 'USD', 'VND']) {
+        const curOps = operators.filter((op: any) => (op.currency || 'THB') === cur);
 
-        cell(wsOP, opRow, 1, op.company_name, opBg, true);
-        const cnC = wsOP.getCell(opRow, 2);
-        cnC.value = Number(op.voucher_count); cnC.font = { name: 'Arial', size: 10, bold: true };
-        cnC.alignment = { horizontal: 'center' }; cnC.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: opBg } };
-        cnC.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
-        money(wsOP, opRow, 3, op.total_owed_to_operator, opBg);
-        money(wsOP, opRow, 4, op.total_sent_to_operator, opBg);
-        money(wsOP, opRow, 5, balance, opBg, true);
-        wsOP.getRow(opRow).height = 20;
+        // Currency section header — always shown
+        wsOP.mergeCells(opRow, 1, opRow, 5);
+        const secCell = wsOP.getCell(opRow, 1);
+        secCell.value = `${cur}  ${OP_SYM[cur]}`;
+        secCell.font = { name: 'Arial', bold: true, size: 12, color: { argb: 'FFFFFFFF' } };
+        secCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${OP_HDR[cur]}` } };
+        secCell.alignment = { horizontal: 'center', vertical: 'middle' };
+        wsOP.getRow(opRow).height = 22;
         opRow++;
 
-        // Sub-rows: ваучеры оператора
-        const vouchers = Array.isArray(op.vouchers) ? op.vouchers : [];
-        if (vouchers.length > 0) {
-          // Sub-header
-          ['', 'Ваучер №', 'Дата тура', 'Нетто', 'Статус'].forEach((h, i) => {
-            const c = wsOP.getCell(opRow, i + 1);
-            c.value = h;
-            c.font = { name: 'Arial', size: 9, bold: true, color: { argb: 'FF555555' } };
-            c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F5F5' } };
-            c.border = { bottom: { style: 'hair', color: { argb: 'FFD0D0D0' } } };
-          });
-          wsOP.getRow(opRow).height = 14;
-          opRow++;
+        // Column headers
+        ['Компания', 'Ваучеров', 'Нетто (к оплате)', 'Отправлено', 'Баланс']
+          .forEach((h, i) => hdr(wsOP, opRow, i + 1, h));
+        wsOP.getRow(opRow).height = 28;
+        opRow++;
 
-          vouchers.forEach((v: any) => {
-            const stBg = v.payment_status === 'paid' ? 'FFF0FFF0' : v.payment_status === 'partial' ? 'FFFFFDE7' : 'FFFFF3E0';
-            wsOP.getCell(opRow, 1).value = '';
-            cell(wsOP, opRow, 2, v.voucher_number || '—', stBg);
-            cell(wsOP, opRow, 3, fmt(v.tour_date), stBg);
-            money(wsOP, opRow, 4, v.total_net, stBg);
-            cell(wsOP, opRow, 5, STATUS_OP[v.payment_status] || v.payment_status, stBg);
-            wsOP.getRow(opRow).height = 16;
+        if (curOps.length === 0) {
+          wsOP.mergeCells(opRow, 1, opRow, 5);
+          const emptyOp = wsOP.getCell(opRow, 1);
+          emptyOp.value = 'Нет данных за выбранный период';
+          emptyOp.font = { name: 'Arial', size: 10, italic: true, color: { argb: 'FF888888' } };
+          emptyOp.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF9F9F9' } };
+          emptyOp.alignment = { horizontal: 'center' };
+          wsOP.getRow(opRow).height = 18;
+          opRow++;
+        } else {
+          curOps.forEach((op: any) => {
+            const balance = parseFloat(op.total_sent_to_operator) - parseFloat(op.total_owed_to_operator);
+            const opBg = balance > 0 ? LIGHT_GREEN : balance < 0 ? LIGHT_RED : WHITE;
+
+            cell(wsOP, opRow, 1, op.company_name, opBg, true);
+            const cnC = wsOP.getCell(opRow, 2);
+            cnC.value = Number(op.voucher_count);
+            cnC.font = { name: 'Arial', size: 10, bold: true };
+            cnC.alignment = { horizontal: 'center' };
+            cnC.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: opBg } };
+            cnC.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
+            money(wsOP, opRow, 3, op.total_owed_to_operator, opBg);
+            money(wsOP, opRow, 4, op.total_sent_to_operator, opBg);
+            money(wsOP, opRow, 5, balance, opBg, true);
+            wsOP.getCell(opRow, 5).font = {
+              name: 'Arial', size: 10, bold: true,
+              color: { argb: balance >= 0 ? 'FF1B6B3A' : 'FF9B0000' },
+            };
+            wsOP.getRow(opRow).height = 20;
             opRow++;
+
+            const voucherList = Array.isArray(op.vouchers) ? op.vouchers : [];
+            if (voucherList.length > 0) {
+              ['', 'Ваучер №', 'Дата тура', 'Нетто', 'Статус'].forEach((h, i) => {
+                const c = wsOP.getCell(opRow, i + 1);
+                c.value = h;
+                c.font = { name: 'Arial', size: 9, bold: true, color: { argb: 'FF555555' } };
+                c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F5F5' } };
+                c.border = { bottom: { style: 'hair', color: { argb: 'FFD0D0D0' } } };
+              });
+              wsOP.getRow(opRow).height = 14;
+              opRow++;
+
+              voucherList.forEach((v: any) => {
+                const stBg = v.payment_status === 'paid' ? 'FFF0FFF0' : v.payment_status === 'partial' ? 'FFFFFDE7' : 'FFFFF3E0';
+                wsOP.getCell(opRow, 1).value = '';
+                cell(wsOP, opRow, 2, v.voucher_number || '—', stBg);
+                cell(wsOP, opRow, 3, fmt(v.tour_date), stBg);
+                money(wsOP, opRow, 4, v.total_net, stBg);
+                cell(wsOP, opRow, 5, STATUS_OP[v.payment_status] || v.payment_status, stBg);
+                wsOP.getRow(opRow).height = 16;
+                opRow++;
+              });
+            }
           });
         }
-      });
+        opRow++; // blank row between currencies
+      }
 
       [30, 10, 18, 16, 16].forEach((w, i) => { wsOP.getColumn(i + 1).width = w; });
     }
@@ -1955,7 +2306,79 @@ export const exportAccountingReport = async (req: AuthRequest, res: Response) =>
       [28, 14, 10, 14, 14, 20].forEach((w, i) => { wsEmp.getColumn(i + 1).width = w; });
     }
 
-    const filename = `accounting_${dateFrom}_${dateTo || dateFrom}.xlsx`;
+    // ── SHEET 5: АГЕНТЫ (секции по валюте) ────────────────
+    {
+      const wsAg = wb.addWorksheet('Агенты');
+      wsAg.mergeCells('A1:E1');
+      const agTitle = wsAg.getCell('A1');
+      agTitle.value = `АГЕНТЫ — ${dateFormatted}`;
+      agTitle.font = { name: 'Arial', bold: true, size: 13, color: { argb: BLUE_HEADER } };
+      agTitle.alignment = { horizontal: 'center', vertical: 'middle' };
+      wsAg.getRow(1).height = 26;
+
+      const AG_SYM: Record<string, string> = { THB: '฿', USD: '$', VND: '₫' };
+      const AG_HDR: Record<string, string> = { THB: '1E6E4B', USD: '1A5276', VND: '7D6608' };
+      let agRow = 2;
+
+      for (const cur of ['THB', 'USD', 'VND']) {
+        const curAgents = agents.filter((a: any) => (a.currency || 'THB') === cur);
+        if (curAgents.length === 0) continue;
+
+        // Currency section header
+        wsAg.mergeCells(agRow, 1, agRow, 5);
+        const secCell = wsAg.getCell(agRow, 1);
+        secCell.value = `${cur}  ${AG_SYM[cur]}`;
+        secCell.font = { name: 'Arial', bold: true, size: 12, color: { argb: 'FFFFFFFF' } };
+        secCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${AG_HDR[cur]}` } };
+        secCell.alignment = { horizontal: 'center', vertical: 'middle' };
+        wsAg.getRow(agRow).height = 22;
+        agRow++;
+
+        // Column headers
+        ['Агент', 'За период', 'Всего начислено', 'Всего выплачено', 'Баланс']
+          .forEach((h, i) => hdr(wsAg, agRow, i + 1, h));
+        wsAg.getRow(agRow).height = 28;
+        agRow++;
+
+        if (curAgents.length === 0) {
+          wsAg.mergeCells(agRow, 1, agRow, 5);
+          const emptyAg = wsAg.getCell(agRow, 1);
+          emptyAg.value = 'Нет данных за выбранный период';
+          emptyAg.font = { name: 'Arial', size: 10, italic: true, color: { argb: 'FF888888' } };
+          emptyAg.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF9F9F9' } };
+          emptyAg.alignment = { horizontal: 'center' };
+          wsAg.getRow(agRow).height = 18;
+          agRow++;
+        } else {
+          curAgents.forEach((a: any) => {
+            const commPeriod = Number(a.commission_period);
+            const commTotal  = Number(a.commission_total);
+            const paid       = Number(a.total_paid);
+            const balance    = paid - commTotal;
+            const bg = balance >= 0 ? LIGHT_GREEN : LIGHT_RED;
+
+            cell(wsAg, agRow, 1, a.agent_name, bg, true);
+            money(wsAg, agRow, 2, commPeriod, bg);
+            money(wsAg, agRow, 3, commTotal, bg);
+            money(wsAg, agRow, 4, paid, bg);
+            money(wsAg, agRow, 5, balance, bg, true);
+            wsAg.getCell(agRow, 5).font = {
+              name: 'Arial', size: 10, bold: true,
+              color: { argb: balance >= 0 ? 'FF1B6B3A' : 'FF9B0000' },
+            };
+            wsAg.getRow(agRow).height = 20;
+            agRow++;
+          });
+        }
+        agRow++; // blank row between currencies
+      }
+
+      [30, 16, 18, 18, 16].forEach((w, i) => { wsAg.getColumn(i + 1).width = w; });
+    }
+
+    const filename = filterCurrency
+      ? `accounting_${filterCurrency}_${dateFrom}_${dateTo || dateFrom}.xlsx`
+      : `accounting_${dateFrom}_${dateTo || dateFrom}.xlsx`;
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     await wb.xlsx.write(res);

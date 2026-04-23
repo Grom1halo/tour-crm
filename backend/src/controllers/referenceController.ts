@@ -432,6 +432,70 @@ export const updateAgent = async (req: AuthRequest, res: Response) => {
   }
 };
 
+// ===== PAYMENT METHODS =====
+export const getPaymentMethods = async (req: AuthRequest, res: Response) => {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM payment_methods WHERE is_active = true ORDER BY sort_order, name'
+    );
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Get payment methods error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+export const createPaymentMethod = async (req: AuthRequest, res: Response) => {
+  try {
+    const { name } = req.body;
+    if (!name?.trim()) return res.status(400).json({ error: 'Name required' });
+    const result = await pool.query(
+      'INSERT INTO payment_methods (name, sort_order) VALUES ($1, (SELECT COALESCE(MAX(sort_order),0)+1 FROM payment_methods)) RETURNING *',
+      [name.trim()]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (error: any) {
+    if (error.code === '23505') return res.status(400).json({ error: 'Method already exists' });
+    console.error('Create payment method error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+export const updatePaymentMethod = async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { name } = req.body;
+    if (!name?.trim()) return res.status(400).json({ error: 'Name required' });
+    // Check system
+    const check = await pool.query('SELECT is_system FROM payment_methods WHERE id=$1', [id]);
+    if (check.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    if (check.rows[0].is_system) return res.status(400).json({ error: 'Cannot rename system method' });
+    const result = await pool.query(
+      'UPDATE payment_methods SET name=$1 WHERE id=$2 RETURNING *',
+      [name.trim(), id]
+    );
+    res.json(result.rows[0]);
+  } catch (error: any) {
+    if (error.code === '23505') return res.status(400).json({ error: 'Method already exists' });
+    console.error('Update payment method error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+export const deletePaymentMethod = async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const check = await pool.query('SELECT is_system FROM payment_methods WHERE id=$1', [id]);
+    if (check.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    if (check.rows[0].is_system) return res.status(400).json({ error: 'Cannot delete system method' });
+    await pool.query('UPDATE payment_methods SET is_active=false WHERE id=$1', [id]);
+    res.json({ message: 'Deleted' });
+  } catch (error) {
+    console.error('Delete payment method error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
 // ===== SEASONS =====
 export const getSeasons = async (req: AuthRequest, res: Response) => {
   try {

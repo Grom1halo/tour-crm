@@ -95,6 +95,12 @@ export const createAgent = (data: any) => api.post('/agents', data);
 export const updateAgent = (id: number, data: any) => api.put(`/agents/${id}`, data);
 export const deleteAgent = (id: number) => api.delete(`/agents/${id}`);
 
+// Payment Methods
+export const getPaymentMethods = () => api.get('/payment-methods');
+export const createPaymentMethod = (name: string) => api.post('/payment-methods', { name });
+export const updatePaymentMethod = (id: number, name: string) => api.put(`/payment-methods/${id}`, { name });
+export const deletePaymentMethod = (id: number) => api.delete(`/payment-methods/${id}`);
+
 // Seasons
 export const getSeasons = () => api.get('/seasons');
 export const createSeason = (data: any) => api.post('/seasons', data);
@@ -102,31 +108,38 @@ export const updateSeason = (id: number, data: any) => api.put(`/seasons/${id}`,
 export const deleteSeason = (id: number) => api.delete(`/seasons/${id}`);
 
 // Accounting
-export const getAccountingDashboard = () => api.get('/accounting/dashboard');
+export const getAccountingDashboard = (params?: any) => api.get('/accounting/dashboard', { params });
+export const getRevenueBreakdown = (params?: any) => api.get('/accounting/revenue', { params });
 export const getAccountingCashflow = (params?: any) => api.get('/accounting/cashflow', { params });
+export const getPaymentMethodBalances = () => api.get('/accounting/balances');
 export const addAccountingEntry = (data: any) => api.post('/accounting/cashflow', data);
 export const updateAccountingEntry = (id: number, data: any) => api.put(`/accounting/cashflow/${id}`, data);
 export const deleteAccountingEntry = (id: number) => api.delete(`/accounting/cashflow/${id}`);
+export const confirmDepositEntry = (id: number) => api.patch(`/accounting/cashflow/${id}/confirm`);
 export const getOperatorReconciliation = (params?: any) => api.get('/accounting/operators', { params });
 export const payOperatorVouchers = (data: any) => api.post('/accounting/operators/pay', data);
 export const writeOffOperatorDebt = (data: any) => api.post('/accounting/operators/writeoff', data);
 export const closeOperatorPeriod = (data: any) => api.post('/accounting/operators/close-period', data);
+export const getCompanyPaymentHistory = (companyId: number) => api.get(`/accounting/company/${companyId}/history`);
 export const getEmployeeData = (params?: any) => api.get('/accounting/employees', { params });
 export const addEmployeePayment = (data: any) => api.post('/accounting/employee-payments', data);
 export const updateEmployeePayment = (id: number, data: any) => api.put(`/accounting/employee-payments/${id}`, data);
 export const deleteEmployeePayment = (id: number) => api.delete(`/accounting/employee-payments/${id}`);
 export const updateEmployeeSalary = (id: number, baseSalary: number) => api.put(`/accounting/employees/${id}/salary`, { baseSalary });
 export const updateEmployeeSalaryPct = (id: number, commissionPercentage: number) => api.put(`/accounting/employees/${id}/salary`, { commissionPercentage });
+export const getAgentReconciliation = (params?: any) => api.get('/accounting/agents', { params });
+export const payAgentVouchers = (data: any) => api.post('/accounting/agents/pay', data);
+export const writeOffAgentDebt = (data: any) => api.post('/accounting/agents/writeoff', data);
 
 // Voucher confirmation (for accountants)
 export const confirmVoucher = (id: number, field: string) => api.patch(`/vouchers/${id}/confirm`, { field });
 
 // Statistics
-export const getMonthlyStats = (year?: number) => api.get('/statistics/monthly', { params: { year } });
-export const getSeasonStats = () => api.get('/statistics/seasons');
-export const getAllTimeStats    = () => api.get('/statistics/all-time');
-export const getStatsByTour    = (year?: number) => api.get('/statistics/by-tour',    { params: year ? { year } : {} });
-export const getStatsByCompany = (year?: number) => api.get('/statistics/by-company', { params: year ? { year } : {} });
-export const getStatsByClient  = (year?: number) => api.get('/statistics/by-client',  { params: year ? { year } : {} });
+export const getMonthlyStats = (year?: number, currency?: string) => api.get('/statistics/monthly', { params: { year, currency } });
+export const getSeasonStats = (currency?: string) => api.get('/statistics/seasons', { params: { currency } });
+export const getAllTimeStats    = (currency?: string) => api.get('/statistics/all-time',    { params: currency ? { currency } : {} });
+export const getStatsByTour    = (year?: number, currency?: string) => api.get('/statistics/by-tour',    { params: { ...(year ? { year } : {}), ...(currency ? { currency } : {}) } });
+export const getStatsByCompany = (year?: number, currency?: string) => api.get('/statistics/by-company', { params: { ...(year ? { year } : {}), ...(currency ? { currency } : {}) } });
+export const getStatsByClient  = (year?: number, currency?: string) => api.get('/statistics/by-client',  { params: { ...(year ? { year } : {}), ...(currency ? { currency } : {}) } });
 
 export default api;

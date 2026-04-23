@@ -1,0 +1,16 @@
+{
+  "name": "tour-crm-sync",
+  "version": "1.0.0",
+  "description": "Live sync from Timeweb MySQL to PostgreSQL via SSH tunnel",
+  "main": "sync.js",
+  "scripts": {
+    "start": "node sync.js",
+    "dev": "nodemon sync.js"
+  },
+  "dependencies": {
+    "ssh2": "^1.15.0",
+    "mysql2": "^3.6.0",
+    "pg": "^8.11.0",
+    "dotenv": "^16.3.1"
+  }
+}

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import * as api from '../api';
 import { useLanguage } from '../i18n/LanguageContext';
-import { PAYMENT_METHODS } from '../constants/paymentMethods';
+import { PAYMENT_METHODS } from '../constants/paymentMethods'; // fallback
 
 const VoucherFormPage: React.FC = () => {
   const { id } = useParams();
@@ -15,6 +15,7 @@ const VoucherFormPage: React.FC = () => {
   const [companies, setCompanies] = useState<any[]>([]);
   const [tours, setTours] = useState<any[]>([]);
   const [agents, setAgents] = useState<any[]>([]);
+  const [paymentMethodNames, setPaymentMethodNames] = useState<string[]>(PAYMENT_METHODS);
   const [loadingPrices, setLoadingPrices] = useState(false);
 
 
@@ -50,6 +51,7 @@ const VoucherFormPage: React.FC = () => {
     paymentMethod: '',
     paymentDate: today,
     notes: '',
+    companyId: '',
   });
 
   // Prevents company/price effects from overwriting data during initial edit load
@@ -187,11 +189,13 @@ const VoucherFormPage: React.FC = () => {
 
   const loadReferenceData = async () => {
     try {
-      const [companiesRes, agentsRes, toursRes] = await Promise.all([
+      const [companiesRes, agentsRes, toursRes, methodsRes] = await Promise.all([
         api.getCompanies(),
         api.getAgents(),
         api.getTours(),
+        api.getPaymentMethods(),
       ]);
+      setPaymentMethodNames(methodsRes.data.map((m: any) => m.name));
       setCompanies(companiesRes.data);
       setAgents(agentsRes.data);
       setTours(toursRes.data);
@@ -288,6 +292,9 @@ const VoucherFormPage: React.FC = () => {
           paymentMethod: paymentData.paymentMethod,
           paymentDate: paymentData.paymentDate,
           notes: paymentData.notes || null,
+          companyId: paymentData.paymentMethod === 'Депозит в компанию' && paymentData.companyId
+            ? Number(paymentData.companyId)
+            : undefined,
         });
       }
       navigate('/');
@@ -375,6 +382,11 @@ const VoucherFormPage: React.FC = () => {
   };
 
   const { totalNet, totalSale } = calculateTotals();
+
+  const currSym = formData.currency === 'VND' ? '₫'
+    : formData.currency === 'USD' ? '$'
+    : formData.currency === 'RUB' ? '₽'
+    : '฿';
 
   const inputCls = 'w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm';
   const labelCls = 'block text-xs font-medium text-gray-600 mb-1';
@@ -465,7 +477,7 @@ const VoucherFormPage: React.FC = () => {
                   ↑ {companiesForTour.length} компании с этим туром
                 </p>
               )}
-              {!companiesForTour && companies.length > 5 && (
+              {(companiesForTour ?? companies).length > 3 && (
                 <input
                   type="text"
                   placeholder="Поиск компании..."
@@ -500,7 +512,6 @@ const VoucherFormPage: React.FC = () => {
                 <option value="">{t.formSelectCompany}</option>
                 {(companiesForTour ?? companies)
                   .filter(c => {
-                    if (companiesForTour) return true;
                     if (!companySearch) return true;
                     const q = companySearch.toLowerCase();
                     return c.name.toLowerCase().includes(q) || (c.article || '').toLowerCase().includes(q);
@@ -883,6 +894,55 @@ const VoucherFormPage: React.FC = () => {
                 </div>
               </div>
             </div>
+          ) : formData.tourType === 'vietnam' ? (
+            <div className="grid grid-cols-2 gap-6">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-700 mb-3">{t.formSalePricesTitle}</h3>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className={labelCls}>Взрослый {currSym}</label>
+                    <input type="number" name="adultSale" value={formData.adultSale} onChange={handleChange} step="1" className={inputCls} />
+                  </div>
+                  <div>
+                    <label className={labelCls}>Ребёнок {currSym}</label>
+                    <input type="number" name="childSale" value={formData.childSale} onChange={handleChange} step="1" className={inputCls} />
+                  </div>
+                  <div>
+                    <label className={labelCls}>Трансфер {currSym}</label>
+                    <input type="number" name="transferSale" value={formData.transferSale} onChange={handleChange} step="1" className={inputCls} />
+                  </div>
+                  <div>
+                    <label className={labelCls}>Прочее {currSym}</label>
+                    <input type="number" name="otherSale" value={formData.otherSale} onChange={handleChange} step="1" className={inputCls} />
+                  </div>
+                </div>
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-orange-600 mb-3">⚠ {t.formNetPricesTitle} (себестоимость)</h3>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className={labelCls}>Взрослый {currSym}</label>
+                    <input type="number" name="adultNet" value={formData.adultNet} onChange={handleChange} step="1"
+                      className={`${inputCls} ${!formData.adultNet ? 'border-orange-400 bg-orange-50' : ''}`} />
+                  </div>
+                  <div>
+                    <label className={labelCls}>Ребёнок {currSym}</label>
+                    <input type="number" name="childNet" value={formData.childNet} onChange={handleChange} step="1" className={inputCls} />
+                  </div>
+                  <div>
+                    <label className={labelCls}>Трансфер {currSym}</label>
+                    <input type="number" name="transferNet" value={formData.transferNet} onChange={handleChange} step="1" className={inputCls} />
+                  </div>
+                  <div>
+                    <label className={labelCls}>Прочее {currSym}</label>
+                    <input type="number" name="otherNet" value={formData.otherNet} onChange={handleChange} step="1" className={inputCls} />
+                  </div>
+                </div>
+                {!formData.adultNet && Number(formData.adultSale) > 0 && (
+                  <p className="text-xs text-orange-500 mt-2">⚠ Укажите себестоимость — она нужна для расчёта прибыли</p>
+                )}
+              </div>
+            </div>
           ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
@@ -914,22 +974,22 @@ const VoucherFormPage: React.FC = () => {
           <div className="mt-4 bg-blue-50 rounded-lg p-3 grid grid-cols-4 gap-4 text-sm font-semibold">
             <div>
               <span className="text-gray-600">{t.formNetTotal}</span>
-              <span className="ml-2 text-blue-700">฿{totalNet.toFixed(2)}</span>
+              <span className="ml-2 text-blue-700">{currSym}{totalNet.toFixed(0)}</span>
             </div>
             <div>
               <span className="text-gray-600">{t.formSaleTotal}</span>
-              <span className="ml-2 text-green-700">฿{totalSale.toFixed(2)}</span>
+              <span className="ml-2 text-green-700">{currSym}{totalSale.toFixed(0)}</span>
             </div>
             <div>
               <span className="text-gray-600">{t.formProfit}</span>
               <span className={`ml-2 font-bold ${totalSale - totalNet >= 0 ? 'text-green-700' : 'text-red-600'}`}>
-                ฿{(totalSale - totalNet).toFixed(2)}
+                {currSym}{(totalSale - totalNet).toFixed(0)}
               </span>
             </div>
             <div>
               <span className="text-gray-600">Кэш на туре</span>
               <span className={`ml-2 font-bold ${totalSale - Number(depositAmount || 0) > 0 ? 'text-orange-600' : 'text-gray-500'}`}>
-                ฿{Math.max(0, totalSale - Number(depositAmount || 0)).toFixed(2)}
+                {currSym}{Math.max(0, totalSale - Number(depositAmount || 0)).toFixed(0)}
               </span>
             </div>
           </div>
@@ -959,6 +1019,28 @@ const VoucherFormPage: React.FC = () => {
             <div>
               <label className={labelCls}>{t.formAgentCommission}</label>
               <input type="number" name="agentCommissionPercentage" value={formData.agentCommissionPercentage} onChange={handleChange} step="0.01" className={inputCls} />
+              {/* Live commission breakdown */}
+              {Number(formData.agentCommissionPercentage) > 0 && (() => {
+                const grossProfit = totalSale - totalNet;
+                const agentComm = Math.round(grossProfit * Number(formData.agentCommissionPercentage) / 100);
+                const profitAfterAgent = grossProfit - agentComm;
+                return (
+                  <div className="mt-2 p-3 bg-orange-50 border border-orange-200 rounded-lg text-xs space-y-1.5">
+                    <div className="flex justify-between text-gray-600">
+                      <span>Валовая прибыль:</span>
+                      <span className="font-semibold">{currSym}{grossProfit.toLocaleString('ru-RU', { maximumFractionDigits: 0 })}</span>
+                    </div>
+                    <div className="flex justify-between text-orange-700">
+                      <span>Комиссия агента ({formData.agentCommissionPercentage}%):</span>
+                      <span className="font-semibold">− {currSym}{agentComm.toLocaleString('ru-RU', { maximumFractionDigits: 0 })}</span>
+                    </div>
+                    <div className="flex justify-between text-blue-800 font-bold border-t border-orange-200 pt-1.5">
+                      <span>Прибыль после агента:</span>
+                      <span>{currSym}{profitAfterAgent.toLocaleString('ru-RU', { maximumFractionDigits: 0 })}</span>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
@@ -1057,13 +1139,32 @@ const VoucherFormPage: React.FC = () => {
                 <label className={labelCls}>{t.formPaymentMethod}</label>
                 <select
                   value={paymentData.paymentMethod}
-                  onChange={e => setPaymentData(prev => ({ ...prev, paymentMethod: e.target.value }))}
+                  onChange={e => setPaymentData(prev => ({ ...prev, paymentMethod: e.target.value, companyId: '' }))}
                   className={inputCls}
                 >
                   <option value="">{t.formPaymentSelectMethod}</option>
-                  {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
+                  {paymentMethodNames.map((m: string) => <option key={m} value={m}>{m}</option>)}
                 </select>
               </div>
+              {paymentData.paymentMethod === 'Депозит в компанию' && (
+                <div>
+                  <label className={labelCls}>
+                    Компания-получатель депозита <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={paymentData.companyId}
+                    onChange={e => setPaymentData(prev => ({ ...prev, companyId: e.target.value }))}
+                    className={`${inputCls} ${!paymentData.companyId ? 'border-red-400 bg-red-50' : 'border-green-400 bg-green-50'}`}
+                    required
+                  >
+                    <option value="">— Выберите компанию —</option>
+                    {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                  {!paymentData.companyId && (
+                    <p className="text-xs text-red-500 mt-1">Укажите компанию, на счёт которой идут средства</p>
+                  )}
+                </div>
+              )}
               <div>
                 <label className={labelCls}>{t.formPaymentDate}</label>
                 <input

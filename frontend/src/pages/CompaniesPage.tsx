@@ -23,7 +23,9 @@ const CompaniesPage: React.FC = () => {
   const [editing, setEditing] = useState<any>(null);
   const [formData, setFormData] = useState({ name: '', article: '', isActive: true });
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [expandedTab, setExpandedTab] = useState<Record<number, 'tours' | 'history'>>({});
   const [companyTours, setCompanyTours] = useState<Record<number, any[]>>({});
+  const [companyHistory, setCompanyHistory] = useState<Record<number, any[]>>({});
   const [editingTourPrice, setEditingTourPrice] = useState<any>(null);
   const [priceForm, setPriceForm] = useState({ adultNet: 0, childNet: 0 });
 
@@ -127,10 +129,19 @@ const CompaniesPage: React.FC = () => {
   const toggleExpand = async (c: any) => {
     if (expandedId === c.id) { setExpandedId(null); return; }
     setExpandedId(c.id);
+    if (!expandedTab[c.id]) setExpandedTab(prev => ({ ...prev, [c.id]: 'tours' }));
     try {
       const res = await api.getToursByCompany(c.id);
       setCompanyTours(prev => ({ ...prev, [c.id]: res.data }));
     } catch { setCompanyTours(prev => ({ ...prev, [c.id]: [] })); }
+  };
+
+  const loadHistory = async (companyId: number) => {
+    if (companyHistory[companyId]) return; // already loaded
+    try {
+      const res = await api.getCompanyPaymentHistory(companyId);
+      setCompanyHistory(prev => ({ ...prev, [companyId]: res.data }));
+    } catch { setCompanyHistory(prev => ({ ...prev, [companyId]: [] })); }
   };
 
   const inputCls = 'w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm';
@@ -193,49 +204,97 @@ const CompaniesPage: React.FC = () => {
                 </tr>
                 {expandedId === c.id && (
                   <tr>
-                    <td colSpan={4} className="bg-gray-50 px-8 py-3 border-b border-gray-100">
-                      {!companyTours[c.id] ? (
-                        <span className="text-gray-400 text-xs">Загрузка...</span>
-                      ) : companyTours[c.id].length === 0 ? (
-                        <span className="text-gray-400 text-xs">Туры не найдены</span>
-                      ) : (
-                        <div className="flex flex-col gap-1.5">
-                          {companyTours[c.id].map((tour: any) => (
-                            <div key={tour.id} className="flex items-center justify-between bg-white rounded-lg px-3 py-2 border border-gray-100 shadow-sm">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <span className={`px-1.5 py-0.5 rounded text-xs font-semibold ${TOUR_TYPE_COLORS[tour.tour_type] || 'bg-gray-100 text-gray-600'}`}>
-                                  {tour.tour_type === 'group' ? 'Гр' : tour.tour_type === 'individual' ? 'Инд' : 'ТФ'}
-                                </span>
-                                <span className="text-sm text-gray-800">{tour.name}</span>
-                                {tour.adult_net != null && (
-                                  <span className="text-xs text-gray-500 bg-gray-50 rounded px-1.5 py-0.5 border border-gray-200">
-                                    net Взрослый ฿{Number(tour.adult_net).toFixed(0)}
-                                    {Number(tour.child_net) > 0 && ` / net Ребенок ฿${Number(tour.child_net).toFixed(0)}`}
+                    <td colSpan={4} className="bg-gray-50 px-6 py-3 border-b border-gray-100">
+                      {/* Вкладки */}
+                      <div className="flex gap-2 mb-3">
+                        <button
+                          onClick={() => setExpandedTab(prev => ({ ...prev, [c.id]: 'tours' }))}
+                          className={`px-3 py-1 text-xs rounded-lg font-medium transition ${(expandedTab[c.id] || 'tours') === 'tours' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'}`}
+                        >Туры</button>
+                        <button
+                          onClick={() => { setExpandedTab(prev => ({ ...prev, [c.id]: 'history' })); loadHistory(c.id); }}
+                          className={`px-3 py-1 text-xs rounded-lg font-medium transition ${expandedTab[c.id] === 'history' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'}`}
+                        >💳 История оплат</button>
+                      </div>
+
+                      {(expandedTab[c.id] || 'tours') === 'tours' && (
+                        !companyTours[c.id] ? (
+                          <span className="text-gray-400 text-xs">Загрузка...</span>
+                        ) : companyTours[c.id].length === 0 ? (
+                          <span className="text-gray-400 text-xs">Туры не найдены</span>
+                        ) : (
+                          <div className="flex flex-col gap-1.5">
+                            {companyTours[c.id].map((tour: any) => (
+                              <div key={tour.id} className="flex items-center justify-between bg-white rounded-lg px-3 py-2 border border-gray-100 shadow-sm">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className={`px-1.5 py-0.5 rounded text-xs font-semibold ${TOUR_TYPE_COLORS[tour.tour_type] || 'bg-gray-100 text-gray-600'}`}>
+                                    {tour.tour_type === 'group' ? 'Гр' : tour.tour_type === 'individual' ? 'Инд' : 'ТФ'}
                                   </span>
-                                )}
-                                {tour.price_updated_at && (
-                                  <span className="text-xs text-gray-400">
-                                    {new Date(tour.price_updated_at).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' })}
-                                  </span>
-                                )}
+                                  <span className="text-sm text-gray-800">{tour.name}</span>
+                                  {tour.adult_net != null && (
+                                    <span className="text-xs text-gray-500 bg-gray-50 rounded px-1.5 py-0.5 border border-gray-200">
+                                      net Взрослый ฿{Number(tour.adult_net).toFixed(0)}
+                                      {Number(tour.child_net) > 0 && ` / net Ребенок ฿${Number(tour.child_net).toFixed(0)}`}
+                                    </span>
+                                  )}
+                                  {tour.price_updated_at && (
+                                    <span className="text-xs text-gray-400">
+                                      {new Date(tour.price_updated_at).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' })}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-2 ml-4">
+                                  <button onClick={() => openPriceEdit(tour)} className="text-xs text-green-600 hover:text-green-800 font-medium whitespace-nowrap">✏ net</button>
+                                  <button onClick={() => navigate(`/tours?companyId=${c.id}`)} className="text-xs text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap">Цены →</button>
+                                </div>
                               </div>
-                              <div className="flex items-center gap-2 ml-4">
-                                <button
-                                  onClick={() => openPriceEdit(tour)}
-                                  className="text-xs text-green-600 hover:text-green-800 font-medium whitespace-nowrap"
-                                >
-                                  ✏ net
-                                </button>
-                                <button
-                                  onClick={() => navigate(`/tours?companyId=${c.id}`)}
-                                  className="text-xs text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap"
-                                >
-                                  Цены →
-                                </button>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
+                            ))}
+                          </div>
+                        )
+                      )}
+
+                      {expandedTab[c.id] === 'history' && (
+                        !companyHistory[c.id] ? (
+                          <span className="text-gray-400 text-xs">Загрузка...</span>
+                        ) : companyHistory[c.id].length === 0 ? (
+                          <span className="text-gray-400 text-xs">Нет записей</span>
+                        ) : (
+                          <div className="overflow-x-auto">
+                            <table className="text-xs w-full">
+                              <thead>
+                                <tr className="text-gray-400 border-b border-gray-200">
+                                  <th className="text-left py-1 pr-3">Дата</th>
+                                  <th className="text-left py-1 pr-3">Категория</th>
+                                  <th className="text-left py-1 pr-3">Метод</th>
+                                  <th className="text-right py-1 pr-3">Сумма</th>
+                                  <th className="text-left py-1 pr-3">Ваучер</th>
+                                  <th className="text-left py-1">Примечание</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {companyHistory[c.id].map((h: any) => {
+                                  const sym = h.currency === 'VND' ? '₫' : h.currency === 'USD' ? '$' : '฿';
+                                  return (
+                                    <tr key={h.id} className="border-t border-gray-100 hover:bg-white">
+                                      <td className="py-1 pr-3 text-gray-600">{new Date(h.entry_date).toLocaleDateString('ru-RU')}</td>
+                                      <td className="py-1 pr-3 text-gray-700">{h.category || '—'}</td>
+                                      <td className="py-1 pr-3 text-gray-500">{h.payment_method || '—'}</td>
+                                      <td className={`py-1 pr-3 text-right font-semibold ${h.entry_type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
+                                        {h.entry_type === 'income' ? '+' : '-'}{Number(h.amount).toLocaleString('ru-RU')} {sym}
+                                      </td>
+                                      <td className="py-1 pr-3">
+                                        {h.linked_voucher_number
+                                          ? <a href={`/vouchers/${h.voucher_id}`} className="text-blue-600 hover:underline">#{h.linked_voucher_number}</a>
+                                          : '—'}
+                                      </td>
+                                      <td className="py-1 text-gray-400 truncate max-w-[200px]">{h.notes || ''}</td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        )
                       )}
                     </td>
                   </tr>

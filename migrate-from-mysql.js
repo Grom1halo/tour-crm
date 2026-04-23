@@ -112,14 +112,17 @@ async function main() {
 
   // ── 3. Build lookup maps ────────────────────────────────────────────────────
 
-  // 3a. Unique clients: key = "phone|manager_id"  (phone as primary dedup key)
+  // 3a. Unique clients: key = "phone|manager_id" when phone present,
+  //     "name|manager_id" when phone is empty (avoids merging all no-phone clients)
   const clientMap = new Map(); // key → {name, phone, manager_id}
   for (const v of mysqlVouchers) {
-    const phone = s(v.client_phone);
+    const rawPhone = s(v.client_phone);
+    const phone = (rawPhone && rawPhone !== '-') ? rawPhone : null; // null for empty/dash
     const name  = s(v.client_name);
     const mgr   = v.voucher_created_user_id;
     if (!phone && !name) continue; // skip empty
-    const key = `${phone}|${mgr}`;
+    // When no phone, use name as dedup key so each unique name gets its own client record
+    const key = phone ? `${phone}|${mgr}` : `__name__${name.toLowerCase()}|${mgr}`;
     if (!clientMap.has(key)) {
       clientMap.set(key, { name, phone, manager_id: mgr });
     }

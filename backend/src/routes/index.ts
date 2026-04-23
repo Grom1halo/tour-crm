@@ -82,6 +82,11 @@ router.post('/agents', authenticate, authorize('admin'), referenceController.cre
 router.put('/agents/:id', authenticate, authorize('admin'), referenceController.updateAgent);
 router.delete('/agents/:id', authenticate, authorize('admin'), referenceController.deleteAgent);
 
+router.get('/payment-methods', authenticate, referenceController.getPaymentMethods);
+router.post('/payment-methods', authenticate, authorize('admin', 'accountant'), referenceController.createPaymentMethod);
+router.put('/payment-methods/:id', authenticate, authorize('admin', 'accountant'), referenceController.updatePaymentMethod);
+router.delete('/payment-methods/:id', authenticate, authorize('admin', 'accountant'), referenceController.deletePaymentMethod);
+
 router.get('/seasons', authenticate, referenceController.getSeasons);
 router.post('/seasons', authenticate, authorize('admin'), referenceController.createSeason);
 router.put('/seasons/:id', authenticate, authorize('admin'), referenceController.updateSeason);
@@ -96,19 +101,26 @@ router.get('/statistics/by-company', authenticate, authorize('admin', 'accountan
 router.get('/statistics/by-client', authenticate, authorize('admin', 'accountant'), statisticsController.getStatsByClient);
 
 // ===== ACCOUNTING =====
+router.get('/accounting/revenue', authenticate, authorize('admin', 'accountant'), accountingController.getRevenueBreakdown);
 router.get('/accounting/dashboard', authenticate, authorize('admin', 'accountant'), accountingController.getAccountingDashboard);
 router.get('/accounting/cashflow', authenticate, authorize('admin', 'accountant'), accountingController.getCashflow);
+router.get('/accounting/balances', authenticate, authorize('admin', 'accountant'), accountingController.getPaymentMethodBalances);
 router.post('/accounting/cashflow', authenticate, authorize('admin', 'accountant'), accountingController.addCashflowEntry);
 router.put('/accounting/cashflow/:id', authenticate, authorize('admin', 'accountant'), accountingController.updateCashflowEntry);
 router.delete('/accounting/cashflow/:id', authenticate, authorize('admin', 'accountant'), accountingController.deleteCashflowEntry);
+router.patch('/accounting/cashflow/:id/confirm', authenticate, authorize('admin', 'accountant'), accountingController.confirmCashflowEntry);
 router.get('/accounting/operators', authenticate, authorize('admin', 'accountant'), accountingController.getOperatorReconciliation);
 router.post('/accounting/operators/pay', authenticate, authorize('admin', 'accountant'), accountingController.payOperatorVouchers);
 router.post('/accounting/operators/writeoff', authenticate, authorize('admin', 'accountant'), accountingController.writeOffOperatorDebt);
+router.get('/accounting/company/:id/history', authenticate, authorize('admin', 'accountant'), accountingController.getCompanyPaymentHistory);
 router.post('/accounting/operators/close-period', authenticate, authorize('admin', 'accountant'), accountingController.closeOperatorPeriod);
 router.get('/accounting/employees', authenticate, authorize('admin', 'accountant'), accountingController.getEmployeeData);
 router.post('/accounting/employee-payments', authenticate, authorize('admin', 'accountant'), accountingController.addEmployeePayment);
 router.put('/accounting/employee-payments/:id', authenticate, authorize('admin', 'accountant'), accountingController.updateEmployeePayment);
 router.delete('/accounting/employee-payments/:id', authenticate, authorize('admin', 'accountant'), accountingController.deleteEmployeePayment);
 router.put('/accounting/employees/:id/salary', authenticate, authorize('admin', 'accountant'), accountingController.updateEmployeeSalary);
+router.get('/accounting/agents', authenticate, authorize('admin', 'accountant'), accountingController.getAgentReconciliation);
+router.post('/accounting/agents/pay', authenticate, authorize('admin', 'accountant'), accountingController.payAgentVouchers);
+router.post('/accounting/agents/writeoff', authenticate, authorize('admin', 'accountant'), accountingController.writeOffAgentDebt);
 
 export default router;

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import * as api from '../api';
 
 const fmt = (n: any) => Number(n || 0).toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
-const fmtB = (n: any) => `฿${fmt(n)}`;
+// fmtB is now dynamic — defined inside component using sym
 
 const MONTH_NAMES = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек'];
 
@@ -11,14 +11,14 @@ const thR = thCls + ' text-right';
 const tdCls = 'px-3 py-2 text-sm text-gray-800';
 const tdR = 'px-3 py-2 text-sm text-right';
 
-const Bar: React.FC<{ value: number; max: number; color: string }> = ({ value, max, color }) => {
+const Bar: React.FC<{ value: number; max: number; color: string; sym?: string }> = ({ value, max, color, sym = '฿' }) => {
   const pct = max > 0 ? Math.round((value / max) * 100) : 0;
   return (
     <div className="flex items-center gap-2">
       <div className="flex-1 bg-gray-100 rounded h-4 overflow-hidden">
         <div className={`h-full rounded ${color}`} style={{ width: `${pct}%` }} />
       </div>
-      <span className="text-xs w-24 text-right font-medium">{fmtB(value)}</span>
+      <span className="text-xs w-24 text-right font-medium">{sym}{fmt(value)}</span>
     </div>
   );
 };
@@ -26,6 +26,7 @@ const Bar: React.FC<{ value: number; max: number; color: string }> = ({ value, m
 const StatisticsPage: React.FC = () => {
   const currentYear = new Date().getFullYear();
   const [selectedYear, setSelectedYear] = useState(currentYear);
+  const [currency, setCurrency] = useState('THB');
   const [monthlyData, setMonthlyData] = useState<any>(null);
   const [seasonData, setSeasonData] = useState<any[]>([]);
   const [allTimeData, setAllTimeData] = useState<any[]>([]);
@@ -34,20 +35,24 @@ const StatisticsPage: React.FC = () => {
   const [clientData, setClientData] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
+  const sym = currency === 'VND' ? '₫' : currency === 'USD' ? '$' : '฿';
+  const fmtB = (n: any) => `${sym}${fmt(n)}`;
+
   useEffect(() => {
     loadAll();
-  }, [selectedYear]);
+  }, [selectedYear, currency]);
 
   const loadAll = async () => {
     setLoading(true);
     try {
+      const cur = currency !== 'all' ? currency : undefined;
       const [monthly, seasons, allTime, tours, companies, clients] = await Promise.all([
-        api.getMonthlyStats(selectedYear),
-        api.getSeasonStats(),
-        api.getAllTimeStats(),
-        api.getStatsByTour(selectedYear),
-        api.getStatsByCompany(selectedYear),
-        api.getStatsByClient(selectedYear),
+        api.getMonthlyStats(selectedYear, cur),
+        api.getSeasonStats(cur),
+        api.getAllTimeStats(cur),
+        api.getStatsByTour(selectedYear, cur),
+        api.getStatsByCompany(selectedYear, cur),
+        api.getStatsByClient(selectedYear, cur),
       ]);
       setMonthlyData(monthly.data);
       setSeasonData(seasons.data);
@@ -76,11 +81,21 @@ const StatisticsPage: React.FC = () => {
 
   return (
     <div>
-      <div className="flex justify-between items-center mb-5">
+      <div className="flex justify-between items-center mb-5 flex-wrap gap-3">
         <h1 className="text-2xl font-bold text-gray-800">Статистика</h1>
-        <button onClick={loadAll} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">
-          Обновить
-        </button>
+        <div className="flex items-center gap-3">
+          <div className="flex rounded-lg border border-gray-300 overflow-hidden text-sm">
+            {[{ v: 'THB', label: '🇹🇭 THB (฿)' }, { v: 'VND', label: '🇻🇳 VND (₫)' }].map(opt => (
+              <button key={opt.v} onClick={() => setCurrency(opt.v)}
+                className={`px-3 py-1.5 ${currency === opt.v ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          <button onClick={loadAll} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">
+            Обновить
+          </button>
+        </div>
       </div>
 
       {loading && <div className="text-center py-10 text-gray-400">Загрузка...</div>}
@@ -139,8 +154,8 @@ const StatisticsPage: React.FC = () => {
                               <td className={tdCls + ' font-semibold'}>{MONTH_NAMES[m.month - 1]}</td>
                               <td className={tdR}>{Number(m.voucher_count)}</td>
                               <td className={tdR}>{Number(m.total_pax || 0)}</td>
-                              <td className="px-3 py-2"><Bar value={Number(m.total_sale || 0)} max={maxSale} color="bg-green-400" /></td>
-                              <td className="px-3 py-2"><Bar value={Number(m.profit || 0)} max={maxProfit} color="bg-purple-400" /></td>
+                              <td className="px-3 py-2"><Bar value={Number(m.total_sale || 0)} max={maxSale} color="bg-green-400" sym={sym} /></td>
+                              <td className="px-3 py-2"><Bar value={Number(m.profit || 0)} max={maxProfit} color="bg-purple-400" sym={sym} /></td>
                             </tr>
                           );
                         })}
